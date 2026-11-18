@@ -24,6 +24,7 @@ import {
   TrendingDown,
   FileCheck2,
 } from 'lucide-react';
+import { AIMigrationAdvisorModal } from './ai/AIMigrationAdvisorModal';
 
 interface WhatIfSimulatorProps {
   initialAssetId?: string;
@@ -70,6 +71,7 @@ export const WhatIfSimulator: React.FC<WhatIfSimulatorProps> = ({
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
   const [result, setResult] = useState<WhatIfMigrationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [aiAdvisorOpen, setAiAdvisorOpen] = useState<boolean>(false);
 
   useEffect(() => {
     if (initialAssetId) {
@@ -656,10 +658,44 @@ export const WhatIfSimulator: React.FC<WhatIfSimulatorProps> = ({
                   {result.explanation}
                 </p>
               </div>
+
+              {/* Task 10: AI Migration Advisor Integration */}
+              <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-50/70 via-white to-purple-50/40 border border-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 flex items-center space-x-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-[#5755D9]" />
+                    <span>AI Feasibility & Migration Roadmap Advisory</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Architectural guidance on operational impact, HSM firmware, hybrid transitions, and testing.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAiAdvisorOpen(true)}
+                  className="px-3.5 py-1.5 rounded-lg bg-[#5755D9] hover:bg-[#4644B8] text-white text-xs font-semibold shadow-xs transition cursor-pointer shrink-0"
+                >
+                  Ask AI Advisor
+                </button>
+              </div>
             </div>
           )}
         </div>
       </div>
+
+      {/* Task 10: AI Migration Advisor Modal */}
+      {result && (
+        <AIMigrationAdvisorModal
+          isOpen={aiAdvisorOpen}
+          onClose={() => setAiAdvisorOpen(false)}
+          systemId={result.asset_id}
+          systemName={result.asset_name}
+          baselineScore={result.before.priority_score}
+          baselineBand={result.before.migration_priority}
+          targetPrimitive={operations.map((o) => `${o.component}: ${o.target}`).join(', ')}
+          simulationResult={result}
+        />
+      )}
     </div>
   );
 };

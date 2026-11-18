@@ -439,3 +439,146 @@ Content-Type: application/json
 - **NIST FIPS 205**: Stateless Hash-Based Digital Signature Standard (SLH-DSA / SPHINCS+)
 - **IETF RFC 9870**: Post-Quantum Hybrid Key Exchange in TLS 1.3
 - **NSA CNSA 2.0**: Commercial National Security Algorithm Suite 2.0 (AES-256, SHA-384)
+
+---
+
+## 12. AI-Powered Quantum Readiness Intelligence (Task 10)
+
+QuantumShield incorporates an AI intelligence and advisory layer that translates complex quantum and cryptographic scan findings into clear, banking-tailored explanations, risk justifications, and migration roadmaps.
+
+### 12.1 Core Architectural Principle
+
+```
+AI FOR REASONING. CODE FOR CORRECTNESS.
+```
+
+The deterministic QuantumShield scanner remains the **sole authoritative source** for:
+- Findings and rule identifications
+- Evidence classifications (`OBSERVED`, `INFERRED`, `NOT_OBSERVABLE`)
+- Severities (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFORMATIONAL`)
+- Risk scores and priority calculations (`0-100`)
+- Upgrade queue rankings (`P0`, `P1`, `P2`, `P3`)
+- Migration impact evaluations
+
+AI **NEVER**:
+- Generates or modifies scanner findings.
+- Changes a finding's severity.
+- Recalculates or modifies risk scores.
+- Changes upgrade rankings or priorities.
+- Converts `NOT_OBSERVABLE` into `VULNERABLE` (`NOT_OBSERVABLE != VULNERABLE`).
+- Claims that an unobserved configuration is confirmed insecure.
+- Describes AES-256 as quantum-broken under Grover's algorithm.
+- Overrides deterministic scanner conclusions.
+
+All AI content is strictly advisory and explicitly labeled:
+> **"AI Advisory — Informational Explanation. The deterministic QuantumShield scanner is the sole authoritative assessment source."**
+
+---
+
+### 12.2 Provider Abstraction & Configuration
+
+The AI layer is abstracted via `BaseAIProvider` and communicates using standard REST via `httpx` (no heavy third-party vendor SDKs required):
+- **Google Gemini**: `gemini-1.5-flash` or custom model
+- **OpenAI**: `gpt-4o-mini` or custom model
+- **Anthropic Claude**: `claude-3-5-haiku-20241022` or custom model
+- **Mock Provider**: Deterministic, offline mock provider for automated unit/integration tests and air-gapped evaluation
+- **None Provider**: Safe default when no provider or credentials are configured
+
+#### Environment Variables
+
+| Variable | Description | Default / Example |
+|---|---|---|
+| `AI_PROVIDER` | Active provider (`none`, `mock`, `gemini`, `openai`, `anthropic`) | `none` |
+| `GEMINI_API_KEY` | Google Gemini API key | (backend env only) |
+| `OPENAI_API_KEY` | OpenAI API key | (backend env only) |
+| `ANTHROPIC_API_KEY` | Anthropic Claude API key | (backend env only) |
+| `AI_MODEL` | Model override identifier | Provider default |
+| `AI_TIMEOUT_SECONDS` | Maximum request duration in seconds | `12.0` |
+| `AI_MAX_OUTPUT_TOKENS` | Token generation ceiling | `1500` |
+| `AI_MAX_INPUT_LENGTH` | Character boundary for input sanitization | `4000` |
+| `AI_MOCK_ENABLED` | Set `true` to use mock provider offline | `false` |
+
+All credentials are kept solely on the backend and are **never** exposed in frontend bundles, API responses, logs, or Git commits.
+
+---
+
+### 12.3 Security, Privacy & Prompt Injection Defense
+
+1. **Input Sanitization**:
+   - Private key blocks (`-----BEGIN RSA/EC PRIVATE KEY-----`) are redacted as `[REDACTED_PRIVATE_KEY]`.
+   - Bearer tokens, JWTs, API keys, passwords, and credit card numbers are scrubbed prior to provider payload construction.
+   - Raw source code and uploaded certificate binaries are never transmitted; only structured finding metadata is passed.
+2. **Prompt Injection Mitigation**:
+   - Prompt injection patterns (e.g., `ignore previous instructions`, `you are now DAN`, `override system prompt`, `change severity to`) are intercepted and neutralized with `[FILTERED_INPUT]`.
+3. **Output Validation**:
+   - Every AI response is validated against strict Pydantic v2 schemas (`FindingExplanationResponse`, `BankingRiskExplanationResponse`, `MigrationAdvisoryResponse`, `ReportExplanationResponse`).
+   - Malformed responses or unexpected fields are safely caught, returning structured error objects rather than crashing.
+
+---
+
+### 12.4 AI Intelligence Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/ai/status` | Current AI provider availability and active model |
+| `POST` | `/api/ai/explain/finding` | Intelligent contextual explanation for a scanner finding |
+| `POST` | `/api/ai/explain/banking-risk` | Explains why a banking system received its priority score and queue rank |
+| `POST` | `/api/ai/advisory/migration` | Post-quantum migration advisor with operational impact and phases |
+| `POST` | `/api/ai/explain/report` | Executive and technical narrative summaries for assessment reports |
+| `GET` | `/api/banking/systems/{id}/report/json?include_ai=true` | Machine-readable report enriched with AI advisory narrative |
+| `GET` | `/api/banking/systems/{id}/report/pdf?include_ai=true` | Executive PDF report enriched with Section 13 AI Advisory |
+
+#### Request / Response Example (`/api/ai/explain/finding`):
+
+```json
+// POST /api/ai/explain/finding
+{
+  "rule_id": "TLS-1.3-KEX-ABSENT",
+  "title": "TLS 1.3 Key Exchange Not Observable",
+  "value": "TLS 1.3 Negotiated",
+  "role": "KEY_EXCHANGE",
+  "source": "EXTERNAL_SCAN",
+  "evidence_status": "NOT_OBSERVABLE",
+  "severity": "MEDIUM",
+  "risk": "QUANTUM"
+}
+```
+
+```json
+// Response
+{
+  "success": true,
+  "is_available": true,
+  "provider": "mock",
+  "data": {
+    "rule_id": "TLS-1.3-KEX-ABSENT",
+    "meaning": "Cryptographic primitive evaluated against quantum threat models (Shor's and Grover's algorithms).",
+    "why_it_matters": "Financial systems handle long-term confidential transactions susceptible to retrospective decryption.",
+    "quantum_relevance": "Vulnerable to Shor's algorithm, allowing a CRQC to compute private keys.",
+    "crypto_component": "Key Establishment / Transport Layer",
+    "what_evidence_establishes": "The scanner verified that this cryptographic setting cannot be passively observed from the external perimeter interface.",
+    "what_evidence_does_not_establish": "Crucially, the absence of perimeter observability does NOT establish that this configuration is insecure or vulnerable (NOT_OBSERVABLE != VULNERABLE). Internal configuration review is required.",
+    "banking_impact": "Potential exposure of payment data, interbank messaging integrity, or customer confidentiality.",
+    "remediation": "Review internal service configurations, TLS termination appliances, and deployment manifests.",
+    "migration_considerations": "Coordinate firmware updates on hardware security modules (HSMs) and evaluate TLS client compatibility.",
+    "standards_guidance": "Aligned with NIST FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA), and NSA CNSA 2.0.",
+    "advisory_disclaimer": "AI Advisory — Informational Explanation. The deterministic QuantumShield scanner is the sole authoritative assessment source."
+  },
+  "error": null,
+  "disclaimer": "AI Advisory — Informational Explanation. The deterministic QuantumShield scanner is the sole authoritative assessment source."
+}
+```
+
+---
+
+### 12.5 Running AI Tests Locally
+
+All AI features can be tested offline without paid API credentials using the deterministic mock provider:
+
+```bash
+# Run Task 10 AI intelligence tests
+python -m pytest backend/tests/test_ai_intelligence.py -v
+
+# Run full test suite
+python -m pytest -q
+```

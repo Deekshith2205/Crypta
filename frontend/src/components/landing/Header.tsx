@@ -1,5 +1,6 @@
 import React from 'react';
 import { Sun, ArrowRight, ShieldCheck, Download } from 'lucide-react';
+import { AIStatusBadge } from '../ai/AIStatusBadge';
 
 interface HeaderProps {
   activeView: 'scanner' | 'catalog' | 'risk' | 'simulator' | 'upgrade-plan';
@@ -110,6 +111,9 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Section Actions */}
         <div className="flex items-center space-x-3 sm:space-x-4 shrink-0">
+          {/* AI Provider Status Badge */}
+          <AIStatusBadge />
+
           {/* Optional Export Report when scan data is available */}
           {hasScanData && onOpenExportModal && (
             <button

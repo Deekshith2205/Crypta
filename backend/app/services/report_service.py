@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from xml.sax.saxutils import escape
 
 from app.models.banking import BankingAsset
 from app.models.profiles import get_synthetic_profile_by_id, get_synthetic_banking_profiles
@@ -307,10 +308,10 @@ def build_complete_json_report(system_id: str) -> CompleteAssessmentReport:
     )
 
 
-def generate_pdf_report(system_id: str) -> bytes:
+def generate_pdf_report(system_id: str, report: Optional[CompleteAssessmentReport] = None) -> bytes:
     """
     Generates a professional executive-ready PDF report using ReportLab.
-    Covers the 12 required sections with authentic assessment data.
+    Covers the required sections with authentic assessment data.
     """
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
@@ -325,7 +326,8 @@ def generate_pdf_report(system_id: str) -> bytes:
     )
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
-    report = build_complete_json_report(system_id)
+    if report is None:
+        report = build_complete_json_report(system_id)
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -630,6 +632,61 @@ def generate_pdf_report(system_id: str) -> bytes:
     ]))
     elements.append(audit_table)
 
+    # 13. AI Advisory (if present)
+    if getattr(report, "ai_advisory", None):
+        elements.append(Spacer(1, 6))
+        elements.append(Paragraph("13. AI Advisory — Informational Explanation", h1_style))
+
+        ai_data = [
+            [
+                Paragraph("<b>Status:</b>", body_style),
+                Paragraph(
+                    "AI Advisory Layer (Informational Only — Scanner Remains Authoritative)",
+                    body_style,
+                ),
+            ],
+        ]
+
+        exec_s = report.ai_advisory.get("executive_summary", {})
+        if isinstance(exec_s, dict):
+            if exec_s.get("overall_situation"):
+                ai_data.append([
+                    Paragraph("<b>Executive Summary:</b>", body_style),
+                    Paragraph(escape(str(exec_s["overall_situation"])), body_style),
+                ])
+
+            if exec_s.get("high_level_actions"):
+                ai_data.append([
+                    Paragraph("<b>Recommended Next Steps:</b>", body_style),
+                    Paragraph(escape(str(exec_s["high_level_actions"])), body_style),
+                ])
+
+        tech_s = report.ai_advisory.get("technical_summary", {})
+        if isinstance(tech_s, dict) and tech_s.get("algorithm_migration"):
+            ai_data.append([
+                Paragraph("<b>Technical Direction:</b>", body_style),
+                Paragraph(escape(str(tech_s["algorithm_migration"])), body_style),
+            ])
+
+        disclaimer = report.ai_advisory.get(
+            "advisory_disclaimer",
+            "AI Advisory — Informational Explanation. "
+            "The deterministic QuantumShield scanner is the sole authoritative assessment source.",
+        )
+        ai_data.append([
+            Paragraph("<b>Disclaimer:</b>", body_style),
+            Paragraph(escape(str(disclaimer)), body_style),
+        ])
+
+        ai_table = Table(ai_data, colWidths=[160, 380])
+        ai_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), bg_light),
+            ("BOX", (0, 0), (-1, -1), 1, border_gray),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, border_gray),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(ai_table)
     doc.build(elements)
     buffer.seek(0)
     return buffer.getvalue()

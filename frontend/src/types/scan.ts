@@ -689,4 +689,138 @@ export type CompleteAssessmentReport = {
   what_if_results?: Record<string, unknown> | null;
   audit: AuditRecord;
   audit_metadata: AuditRecord;
+  ai_advisory?: Record<string, unknown> | null;
+};
+
+// ==============================================================================
+// TASK 10: AI-POWERED QUANTUM READINESS INTELLIGENCE
+// ==============================================================================
+
+export type AIStatus = {
+  is_available: boolean;
+  provider: string;
+  model?: string | null;
+  message: string;
+};
+
+export type AIExplanationResult<T> = {
+  success: boolean;
+  is_available: boolean;
+  provider: string;
+  data?: T | null;
+  error?: string | null;
+  disclaimer: string;
+};
+
+export type FindingExplanationRequest = {
+  rule_id: string;
+  title: string;
+  value: string;
+  role: string;
+  source: string;
+  evidence_status: string;
+  severity: string;
+  risk: string;
+  message?: string;
+  recommendation?: string;
+  system_id?: string;
+  asset_id?: string;
+};
+
+export type FindingExplanationResponse = {
+  rule_id: string;
+  meaning: string;
+  why_it_matters: string;
+  quantum_relevance: string;
+  crypto_component: string;
+  what_evidence_establishes: string;
+  what_evidence_does_not_establish: string;
+  banking_impact: string;
+  remediation: string;
+  migration_considerations: string;
+  standards_guidance: string;
+  advisory_disclaimer: string;
+};
+
+export type BankingRiskExplanationRequest = {
+  system_id: string;
+  system_name: string;
+  priority_score: number;
+  priority_band: string;
+  quantum_risk_level?: string;
+  classical_risk_level?: string;
+  criticality?: string;
+  data_sensitivity?: string;
+  data_lifetime?: string;
+  exposure?: string;
+  migration_effort?: string;
+  top_findings?: string[];
+  weak_links?: string[];
+  evidence_gaps?: string[];
+};
+
+export type BankingRiskExplanationResponse = {
+  system_id: string;
+  system_name: string;
+  score_rationale: string;
+  contributing_factors: string[];
+  severity_weighting_explanation: string;
+  upgrade_queue_position_reason: string;
+  supporting_evidence: string[];
+  evidence_gaps_needed: string[];
+  advisory_disclaimer: string;
+};
+
+export type MigrationAdvisoryRequest = {
+  system_id: string;
+  system_name: string;
+  baseline_priority_score: number;
+  baseline_priority_band: string;
+  target_replacement?: string;
+  simulated_changes?: Array<Record<string, unknown>>;
+  projected_priority_score?: number;
+  projected_priority_band?: string;
+  crypto_agility?: string;
+  migration_impact?: string;
+  dependencies?: string[];
+};
+
+export type MigrationAdvisoryResponse = {
+  system_id: string;
+  system_name: string;
+  migration_justification: string;
+  target_cryptographic_roles: string[];
+  pqc_direction: string;
+  operational_impact_assessment: string;
+  interoperability_and_testing: string;
+  suggested_migration_phases: string[];
+  pre_deployment_validation_steps: string[];
+  advisory_disclaimer: string;
+};
+
+export type ReportExplanationRequest = {
+  system_id: string;
+};
+
+export type ReportExplanationResponse = {
+  system_id: string;
+  executive_summary: {
+    overall_situation: string;
+    primary_risks: string;
+    critical_assets: string;
+    high_level_actions: string;
+  };
+  technical_summary: {
+    cryptographic_findings: string;
+    evidence_distinctions: string;
+    algorithm_migration: string;
+    dependencies: string;
+    sequence: string;
+  };
+  management_recommendations: {
+    prioritization_rationale: string;
+    migration_planning: string;
+    governance_and_validation: string;
+  };
+  advisory_disclaimer: string;
 };

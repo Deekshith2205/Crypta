@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { QuantumFinding } from '../types/scan';
 import { ShieldAlert, AlertTriangle, Info, CheckCircle2, Eye, EyeOff, Filter } from 'lucide-react';
+import { AIFindingExplainer } from './ai/AIFindingExplainer';
 
 interface CryptographicFindingsProps {
   findings: QuantumFinding[];
@@ -193,6 +194,11 @@ export const CryptographicFindings: React.FC<CryptographicFindingsProps> = ({ fi
                   <span className="font-semibold text-[#5755D9] block mb-0.5">Recommended Action:</span>
                   <p className="text-slate-700 leading-relaxed">{finding.recommendation}</p>
                 </div>
+              </div>
+
+              {/* AI-Powered Finding Explainer (Task 10.2) */}
+              <div className="pl-2">
+                <AIFindingExplainer finding={finding} />
               </div>
             </div>
           );

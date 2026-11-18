@@ -16,7 +16,9 @@ import {
   Loader2,
   Info,
   Sliders,
+  Sparkles,
 } from 'lucide-react';
+import { AIBankingRiskModal } from './ai/AIBankingRiskModal';
 
 interface BankingRiskOverviewProps {
   onAuditProfile: (profileId: string, suggestedDomain?: string) => void;
@@ -39,6 +41,7 @@ export const BankingRiskOverview: React.FC<BankingRiskOverviewProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>('BANK-PROF-CORE-BANKING');
+  const [selectedAiRisk, setSelectedAiRisk] = useState<BankingRiskAssessment | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -263,6 +266,15 @@ export const BankingRiskOverview: React.FC<BankingRiskOverviewProps> = ({
                       )}
 
                       <button
+                        onClick={() => setSelectedAiRisk(item)}
+                        className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-indigo-50 border border-indigo-200 text-[#5755D9] hover:bg-indigo-100 text-xs font-semibold shadow-xs transition cursor-pointer"
+                        title="AI-powered explanation of why this system received this score and rank"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-[#5755D9]" />
+                        <span>AI Reasoning</span>
+                      </button>
+
+                      <button
                         onClick={() => setExpandedId(isExpanded ? null : item.asset_id)}
                         className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 transition cursor-pointer"
                         aria-label={isExpanded ? 'Collapse analysis' : 'Expand analysis'}
@@ -431,6 +443,28 @@ export const BankingRiskOverview: React.FC<BankingRiskOverviewProps> = ({
             );
           })}
         </div>
+      )}
+      {/* Task 10: AI Banking Risk Modal */}
+      {selectedAiRisk && (
+        <AIBankingRiskModal
+          isOpen={!!selectedAiRisk}
+          onClose={() => setSelectedAiRisk(null)}
+          profile={{
+            id: selectedAiRisk.asset_id,
+            name: selectedAiRisk.asset_name,
+            asset_type: 'CORE_BANKING' as any,
+            criticality: selectedAiRisk.business_context.criticality as any,
+            data_sensitivity: selectedAiRisk.business_context.data_sensitivity as any,
+            data_lifetime: selectedAiRisk.business_context.data_lifetime as any,
+            exposure: selectedAiRisk.business_context.exposure as any,
+            migration_effort: selectedAiRisk.business_context.migration_effort as any,
+            description: selectedAiRisk.explanation,
+            trust_zone: 'RESTRICTED' as any,
+            cryptography: {} as any,
+            compliance_tags: [],
+          }}
+          risk={selectedAiRisk}
+        />
       )}
     </div>
   );
