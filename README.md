@@ -233,6 +233,14 @@ npm install
 
 # Start the Vite development server
 npm run dev
+
+# Run frontend tests
+npm test
+
+# Run frontend type-check, lint, and production build
+npm exec -- tsc -p tsconfig.app.json --noEmit
+npm run lint
+npm run build
 ```
 
 Dashboard available at:
@@ -244,11 +252,14 @@ http://127.0.0.1:5173
 ## 8. Running the Automated Test Suite
 
 ```bash
-# Run all unit, integration, and security regression tests
-pytest
+# Run all backend unit, integration, and security regression tests
+python -m pytest -q
+
+# Run frontend tests
+cd frontend && npm test
 ```
 
-Includes **222 passing unit, integration, and security tests** covering:
+Includes **426 passing backend unit, integration, and security tests** and **15 passing frontend tests** covering:
 - What-If Post-Quantum Migration Simulator (`app.services.migration_simulator`, `app.models.simulation`)
 - Zero-mutation deep-copy semantics and profile immutability
 - Strict migration target algorithm allow-list and validation rejection (422)

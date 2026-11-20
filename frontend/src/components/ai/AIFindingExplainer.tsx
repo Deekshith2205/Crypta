@@ -34,29 +34,10 @@ interface ErrorState {
   unavailable: boolean;
 }
 
-/**
- * Classifies the AI explanation's risk domain using the scanner's
- * structured threat vector rather than the descriptive threat text.
- *
- * QUANTUM identifies the assessment domain, not a vulnerability verdict.
- * Evidence status and scanner severity remain independent and authoritative.
- */
-const getRiskDomain = (vector: string | undefined): string => {
-  const normalized = vector?.trim().toUpperCase();
-
-  switch (normalized) {
-    case 'SHOR':
-    case 'GROVER':
-    case 'SNDL':
-    case 'CLASSICAL_BROKEN':
-    case 'RESISTANT':
-    case 'POST_QUANTUM':
-      return 'QUANTUM';
-
-    default:
-      return 'NOT_OBSERVABLE';
-  }
-};
+import {
+  buildFindingExplanationRequest,
+  validateExplanationResponse,
+} from './findingExplainerLogic';
 
 export const AIFindingExplainer: React.FC<AIFindingExplainerProps> = ({
   finding,
@@ -81,35 +62,24 @@ export const AIFindingExplainer: React.FC<AIFindingExplainerProps> = ({
    * a parent recreating the finding object on every render.
    */
   const requestPayload = useMemo(
-    () => ({
-      rule_id: finding.id,
-      title: finding.title,
-      value: finding.value || finding.algorithm || 'Declared Cryptography',
-
-      role:
-        finding.role ||
-        (finding.category === 'public_key'
-          ? 'DIGITAL_SIGNATURE'
-          : finding.category === 'key_exchange'
-            ? 'KEY_EXCHANGE'
-            : 'DATA_ENCRYPTION'),
-
-      source: finding.source || finding.observed_from || 'EXTERNAL_SCAN',
-
-      evidence_status: (
-        finding.evidence?.trim() ||
-        finding.observability?.trim() ||
-        'NOT_OBSERVABLE'
-      ).toUpperCase(),
-
-      severity: finding.risk_level || 'MEDIUM',
-
-      risk: getRiskDomain(finding.quantum_threat_vector),
-
-      message: finding.security_impact || finding.reason,
-
-      recommendation: finding.recommendation,
-    }),
+    () =>
+      buildFindingExplanationRequest({
+        id: finding.id,
+        title: finding.title,
+        value: finding.value,
+        algorithm: finding.algorithm,
+        role: finding.role,
+        category: finding.category,
+        source: finding.source,
+        observed_from: finding.observed_from,
+        evidence: finding.evidence,
+        observability: finding.observability,
+        risk_level: finding.risk_level,
+        quantum_threat_vector: finding.quantum_threat_vector,
+        security_impact: finding.security_impact,
+        reason: finding.reason,
+        recommendation: finding.recommendation,
+      } as QuantumFinding),
     [
       finding.id,
       finding.title,
@@ -174,39 +144,22 @@ export const AIFindingExplainer: React.FC<AIFindingExplainerProps> = ({
           return;
         }
 
-        if (result.success && result.data) {
-          // Verify that the backend response belongs to this finding.
-          if (result.data.rule_id !== requestPayload.rule_id) {
-            setErrorState({
-              identity: requestIdentity,
-              message:
-                'The AI service returned an explanation for a different finding.',
-              unavailable: false,
-            });
+        const validation = validateExplanationResponse(
+          requestPayload.rule_id,
+          result
+        );
 
-            return;
-          }
-
+        if (validation.data) {
           setExplanationState({
             identity: requestIdentity,
-            data: result.data,
+            data: validation.data,
           });
-
           setErrorState(null);
-        } else if (!result.is_available) {
-          setErrorState({
-            identity: requestIdentity,
-            message:
-              result.error ||
-              'AI provider is not configured. Configure GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY to enable.',
-            unavailable: true,
-          });
         } else {
           setErrorState({
             identity: requestIdentity,
-            message:
-              result.error || 'Unable to generate AI explanation.',
-            unavailable: false,
+            message: validation.error || 'Unable to generate AI explanation.',
+            unavailable: validation.unavailable,
           });
         }
       } catch (err: unknown) {
