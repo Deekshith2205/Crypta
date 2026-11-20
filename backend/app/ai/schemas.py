@@ -92,7 +92,7 @@ class MigrationAdvisoryRequest(BaseModel):
     baseline_priority_band: str = Field(...)
     target_replacement: Optional[str] = Field(default=None, description="Simulated or proposed PQC primitive")
     simulated_changes: List[Dict[str, Any]] = Field(default_factory=list)
-    projected_priority_score: Optional[int] = Field(default=None)
+    projected_priority_score: Optional[int] = Field(default=None, ge=0, le=100)
     projected_priority_band: Optional[str] = Field(default=None)
     crypto_agility: Optional[str] = Field(default="NOT_OBSERVABLE")
     migration_impact: Optional[str] = Field(default="MEDIUM")

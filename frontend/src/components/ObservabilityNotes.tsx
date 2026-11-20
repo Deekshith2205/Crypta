@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ObservabilityScope } from '../types/scan';
-import { Eye, EyeOff, HelpCircle, CheckCircle2 } from 'lucide-react';
+import { Eye, EyeOff, HelpCircle } from 'lucide-react';
 
 interface ObservabilityNotesProps {
   scope?: ObservabilityScope;
@@ -29,16 +29,18 @@ export const ObservabilityNotes: React.FC<ObservabilityNotesProps> = ({ scope, n
         'Symmetric mode of operation (GCM, CBC, CCM) derived from cipher suite standard',
       ];
 
-  const unobservableList = scope?.not_externally_observable && scope.not_externally_observable.length > 0
-    ? scope.not_externally_observable
-    : [
-        'TLS 1.3 KeyShare group if unavailable from client TLS socket APIs',
-        'Server private keys and hardware security module (HSM) seed entropy',
-        'Internal database at-rest encryption and Key Management Service (KMS) policies',
-        'Application-level cryptography (JWT secrets, session tokens, password hashes)',
-        'Internal service-to-service mutual TLS (mTLS) configurations',
-        'VPN and internal corporate network transport cryptography',
-      ];
+  const baseUnobservableList = scope?.not_externally_observable && scope.not_externally_observable.length > 0
+  ? scope.not_externally_observable
+  : [
+      'TLS 1.3 KeyShare group if unavailable from client TLS socket APIs',
+      'Server private keys and hardware security module (HSM) seed entropy',
+      'Internal database at-rest encryption and Key Management Service (KMS) policies',
+      'Application-level cryptography (JWT secrets, session tokens, password hashes)',
+      'Internal service-to-service mutual TLS (mTLS) configurations',
+      'VPN and internal corporate network transport cryptography',
+    ];
+
+  const unobservableList = [...new Set([...baseUnobservableList, ...notes])];
 
   return (
     <div className="rounded-2xl bg-white border border-slate-200/90 p-6 space-y-5 shadow-xs">

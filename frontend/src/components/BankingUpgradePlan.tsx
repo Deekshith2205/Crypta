@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import type { RankedUpgradePlan, RankedUpgradeItem } from '../types/scan';
 import { getBankingUpgradePlan } from '../services/api';
@@ -12,7 +13,6 @@ import {
 } from 'lucide-react';
 import { AIMigrationAdvisorModal } from './ai/AIMigrationAdvisorModal';
 
-
 export const BankingUpgradePlan: React.FC = () => {
   const [plan, setPlan] = useState<RankedUpgradePlan | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -23,9 +23,6 @@ export const BankingUpgradePlan: React.FC = () => {
 
   useEffect(() => {
     let isMounted = true;
-
-    setIsLoading(true);
-    setError(null);
 
     getBankingUpgradePlan()
       .then((data) => {
@@ -43,7 +40,9 @@ export const BankingUpgradePlan: React.FC = () => {
         }
       })
       .finally(() => {
-        if (isMounted) setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       });
 
     return () => {
@@ -108,14 +107,19 @@ export const BankingUpgradePlan: React.FC = () => {
             </div>
             <div className="text-rose-700 mt-0.5">{error}</div>
             <button
-                onClick={() => setRetryCount((count) => count + 1)}
-                className="mt-3 px-3 py-1.5 rounded-lg bg-white border border-rose-200 text-rose-700 hover:bg-rose-100 font-semibold cursor-pointer"
+              onClick={() => {
+                setError(null);
+                setIsLoading(true);
+                setRetryCount((count) => count + 1);
+              }}
+              className="mt-3 px-3 py-1.5 rounded-lg bg-white border border-rose-200 text-rose-700 hover:bg-rose-100 font-semibold cursor-pointer"
             >
-            Retry loading upgrade plan
+              Retry loading upgrade plan
             </button>
           </div>
         </div>
       )}
+
       {!isLoading && !error && plan && (
         <div className="space-y-5">
           {/* Priority Summary */}
@@ -341,6 +345,7 @@ export const BankingUpgradePlan: React.FC = () => {
                             </div>
                           ))}
                         </div>
+
                         <div className="mt-2 p-3 rounded-lg bg-indigo-50 border border-indigo-100">
                           <div className="text-[10px] text-indigo-700">
                             Weighted business exposure factor
@@ -400,6 +405,7 @@ export const BankingUpgradePlan: React.FC = () => {
                       <p className="text-xs text-slate-700 leading-relaxed">
                         {item.recommended_migration}
                       </p>
+
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                           <div className="text-[10px] uppercase font-mono text-slate-500">
@@ -419,7 +425,7 @@ export const BankingUpgradePlan: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Task 10: AI Migration Advisory Trigger */}
+                      {/* AI Migration Advisory Trigger */}
                       <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between">
                         <span className="text-[11px] text-slate-500 font-mono">
                           NIST FIPS 203/204/205 transition roadmap guidance
@@ -479,7 +485,8 @@ export const BankingUpgradePlan: React.FC = () => {
           })}
         </div>
       )}
-      {/* Task 10: AI Migration Advisor Modal */}
+
+      {/* AI Migration Advisor Modal */}
       {advisoryItem && (
         <AIMigrationAdvisorModal
           isOpen={!!advisoryItem}

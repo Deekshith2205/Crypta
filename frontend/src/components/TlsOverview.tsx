@@ -1,6 +1,6 @@
 import React from 'react';
 import type { TargetInfo, CertificateInfo, TlsInfo } from '../types/scan';
-import { Lock, ShieldCheck, Key, Server, CheckCircle, AlertTriangle, Activity, Eye, EyeOff, Zap, Cpu, Radio } from 'lucide-react';
+import { Lock, Key, Server, CheckCircle, AlertTriangle, Activity, Eye, EyeOff, Zap, Cpu, Radio } from 'lucide-react';
 
 interface TlsOverviewProps {
   target: TargetInfo;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Sparkles,
@@ -6,10 +6,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Cpu,
-  Layers,
   Network,
   Milestone,
-  RefreshCw,
 } from 'lucide-react';
 import { adviseMigration } from '../../services/api';
 import type {
@@ -42,57 +40,141 @@ export const AIMigrationAdvisorModal: React.FC<AIMigrationAdvisorModalProps> = (
   simulationResult,
   upgradeItem,
 }) => {
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [advisory, setAdvisory] = useState<MigrationAdvisoryResponse | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isUnavailable, setIsUnavailable] = useState<boolean>(false);
+  const [advisoryState, setAdvisoryState] = useState<{
+    identity: string;
+    data: MigrationAdvisoryResponse;
+  } | null>(null);
+
+  const [errorState, setErrorState] = useState<{
+    identity: string;
+    message: string;
+    unavailable: boolean;
+  } | null>(null);
+
+  const [loadingIdentity, setLoadingIdentity] = useState<string | null>(null);
+  const [retryVersion, setRetryVersion] = useState(0);
+  const requestGeneration = useRef(0);
+
+  const requestIdentity = JSON.stringify([
+    systemId,
+    systemName,
+    baselineScore,
+    baselineBand,
+    targetPrimitive,
+    simulationResult?.operations ?? [],
+    simulationResult?.after?.priority_score ?? null,
+    simulationResult?.after?.priority_band_label ?? null,
+    upgradeItem?.crypto_agility ?? null,
+    upgradeItem?.migration_impact ?? null,
+  ]);
+
+  const advisory =
+    advisoryState?.identity === requestIdentity
+      ? advisoryState.data
+      : null;
+
+  const currentError =
+    errorState?.identity === requestIdentity
+      ? errorState
+      : null;
+
+  const isLoading = isOpen && loadingIdentity === requestIdentity;
+  const errorMessage = currentError?.message ?? null;
+  const isUnavailable = currentError?.unavailable ?? false;
 
   useEffect(() => {
-    if (isOpen && !advisory) {
-      loadAdvisory();
+    if (!isOpen) {
+      requestGeneration.current += 1;
+      return;
     }
-  }, [isOpen, systemId]);
 
-  const loadAdvisory = async () => {
-    setIsLoading(true);
-    setErrorMessage(null);
-    setIsUnavailable(false);
+    const generation = ++requestGeneration.current;
 
-    try {
+    const timeoutId = window.setTimeout(() => {
+      if (requestGeneration.current !== generation) {
+        return;
+      }
+
+      setLoadingIdentity(requestIdentity);
+
       const payload = {
         system_id: systemId,
         system_name: systemName,
         baseline_priority_score: baselineScore,
         baseline_priority_band: baselineBand,
         target_replacement: targetPrimitive,
-        simulated_changes: simulationResult?.comparison?.actions_applied || [],
+        simulated_changes: simulationResult?.operations ?? [],
         projected_priority_score: simulationResult?.after?.priority_score,
         projected_priority_band: simulationResult?.after?.priority_band_label,
         crypto_agility: upgradeItem?.crypto_agility || 'NOT_OBSERVABLE',
         migration_impact: upgradeItem?.migration_impact || 'HIGH',
-        dependencies: upgradeItem?.evidence_gaps || [
-          'HSM FIPS 140-3 firmware update',
-          'TLS 1.3 stack update with hybrid group support',
-        ],
+        dependencies: [],
       };
 
-      const result: AIExplanationResult<MigrationAdvisoryResponse> = await adviseMigration(payload);
+      void (async () => {
+        try {
+          const result: AIExplanationResult<MigrationAdvisoryResponse> =
+            await adviseMigration(payload);
 
-      if (result.success && result.data) {
-        setAdvisory(result.data);
-      } else if (!result.is_available) {
-        setIsUnavailable(true);
-        setErrorMessage(result.error || 'AI provider is not configured.');
-      } else {
-        setErrorMessage(result.error || 'Unable to generate migration advisory.');
+          if (requestGeneration.current !== generation) {
+            return;
+          }
+
+          if (result.success && result.data) {
+            setAdvisoryState({
+              identity: requestIdentity,
+              data: result.data,
+            });
+            setErrorState(null);
+          } else {
+            setErrorState({
+              identity: requestIdentity,
+              message: result.error ||
+                (result.is_available
+                  ? 'Unable to generate migration advisory.'
+                  : 'AI provider is not configured.'),
+              unavailable: !result.is_available,
+            });
+          }
+        } catch (err: unknown) {
+          if (requestGeneration.current !== generation) {
+            return;
+          }
+
+          setErrorState({
+            identity: requestIdentity,
+            message: err instanceof Error
+              ? err.message
+              : 'An unexpected error occurred while communicating with the AI service.',
+            unavailable: false,
+          });
+        } finally {
+          if (requestGeneration.current === generation) {
+            setLoadingIdentity(null);
+          }
+        }
+      })();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+
+      if (requestGeneration.current === generation) {
+        requestGeneration.current += 1;
       }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'An unexpected error occurred while communicating with the AI service.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
+    };
+  }, [
+    isOpen,
+    requestIdentity,
+    retryVersion,
+    systemId,
+    systemName,
+    baselineScore,
+    baselineBand,
+    targetPrimitive,
+    simulationResult,
+    upgradeItem,
+  ]);
   if (!isOpen) return null;
 
   return (
@@ -166,7 +248,9 @@ export const AIMigrationAdvisorModal: React.FC<AIMigrationAdvisorModalProps> = (
               <span>{errorMessage}</span>
               <button
                 type="button"
-                onClick={loadAdvisory}
+                onClick={() => {
+                  setRetryVersion((version) => version + 1);
+                }}
                 className="px-2.5 py-1 rounded bg-white border border-rose-300 text-rose-700 hover:bg-rose-100 transition cursor-pointer"
               >
                 Retry
@@ -181,7 +265,27 @@ export const AIMigrationAdvisorModal: React.FC<AIMigrationAdvisorModalProps> = (
                 <span className="text-[10px] uppercase font-mono font-bold text-slate-500 block">
                   Migration Justification
                 </span>
-                <p className="text-slate-800 leading-relaxed text-[13px]">{advisory.migration_justification}</p>
+                <p className="text-slate-800 leading-relaxed text-[13px]">
+                  {advisory.migration_justification}
+                </p>
+              </div>
+
+              {/* Cryptographic Roles Requiring Migration */}
+              <div className="p-4 rounded-xl bg-amber-50/50 border border-amber-200/80 space-y-2">
+                <span className="text-[10px] uppercase font-mono font-bold text-amber-800 block">
+                  Cryptographic Roles Requiring Migration
+                </span>
+                {advisory.target_cryptographic_roles.length > 0 ? (
+                  <ul className="list-disc list-inside space-y-1 text-slate-700 text-[13px]">
+                    {advisory.target_cryptographic_roles.map((role, idx) => (
+                      <li key={`${role}-${idx}`}>{role}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-slate-600 text-[13px]">
+                    No specific cryptographic roles were identified by the advisory.
+                  </p>
+                )}
               </div>
 
               {/* PQC Direction & Operational Impact */}
@@ -191,7 +295,9 @@ export const AIMigrationAdvisorModal: React.FC<AIMigrationAdvisorModalProps> = (
                     <Cpu className="w-3.5 h-3.5" />
                     <span>PQC Standards Direction</span>
                   </span>
-                  <p className="text-slate-700 leading-relaxed">{advisory.pqc_direction}</p>
+                  <p className="text-slate-700 leading-relaxed">
+                    {advisory.pqc_direction}
+                  </p>
                 </div>
 
                 <div className="p-3.5 rounded-xl bg-white border border-slate-200/80 space-y-1">
@@ -199,7 +305,9 @@ export const AIMigrationAdvisorModal: React.FC<AIMigrationAdvisorModalProps> = (
                     <Network className="w-3.5 h-3.5" />
                     <span>Operational & Network Impact</span>
                   </span>
-                  <p className="text-slate-700 leading-relaxed">{advisory.operational_impact_assessment}</p>
+                  <p className="text-slate-700 leading-relaxed">
+                    {advisory.operational_impact_assessment}
+                  </p>
                 </div>
               </div>
 
@@ -208,7 +316,9 @@ export const AIMigrationAdvisorModal: React.FC<AIMigrationAdvisorModalProps> = (
                 <span className="text-[10px] uppercase font-mono font-bold text-indigo-900 block">
                   Hybrid Transition & Interoperability Considerations
                 </span>
-                <p className="text-slate-700 leading-relaxed">{advisory.interoperability_and_testing}</p>
+                <p className="text-slate-700 leading-relaxed">
+                  {advisory.interoperability_and_testing}
+                </p>
               </div>
 
               {/* Phased Migration Sequence */}
@@ -272,4 +382,3 @@ export const AIMigrationAdvisorModal: React.FC<AIMigrationAdvisorModalProps> = (
     </div>
   );
 };
-

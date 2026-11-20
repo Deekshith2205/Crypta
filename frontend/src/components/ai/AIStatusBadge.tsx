@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { getAIStatus } from '../../services/api';
 import type { AIStatus } from '../../types/scan';
 

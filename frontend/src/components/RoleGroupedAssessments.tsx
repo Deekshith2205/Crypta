@@ -1,6 +1,6 @@
 import React from 'react';
 import type { RoleCategoryAssessment } from '../types/scan';
-import { Layers, ShieldAlert, ShieldCheck, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { Layers, Eye, EyeOff } from 'lucide-react';
 
 interface RoleGroupedAssessmentsProps {
   assessments: RoleCategoryAssessment[];

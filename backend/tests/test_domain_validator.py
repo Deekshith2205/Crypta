@@ -2,6 +2,9 @@
 """
 
 import pytest
+import dns.exception
+
+from unittest.mock import patch
 from app.scanners.domain_validator import (
     normalize_domain_input,
     resolve_domain,
@@ -63,6 +66,17 @@ def test_normalize_too_long():
 
 
 def test_resolve_domain_nonexistent():
-    with pytest.raises(DomainValidationError, match="DNS resolution failed"):
-        resolve_domain("nonexistent-domain-xyz-123456789.org")
+    """A genuine DNS resolution failure must produce a clear validation error."""
+    with patch(
+        "app.security.network.dns.resolver.Resolver"
+    ) as mock_resolver_class:
+        mock_resolver = mock_resolver_class.return_value
+        mock_resolver.resolve.side_effect = dns.exception.DNSException(
+            "simulated DNS failure"
+        )
 
+        with pytest.raises(
+            DomainValidationError,
+            match="DNS resolution failed",
+        ):
+            resolve_domain("nonexistent-domain-xyz-123456789.org")

@@ -52,7 +52,6 @@ class GeminiAIProvider(BaseAIProvider):
             raise AIProviderUnavailableError("Gemini API key is not configured.")
 
         url = GEMINI_API_URL_TEMPLATE.format(model=self._model)
-        params = {"key": self._api_key}
 
         payload = {
             "system_instruction": {
@@ -74,9 +73,11 @@ class GeminiAIProvider(BaseAIProvider):
             async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
                 response = await client.post(
                     url,
-                    params=params,
                     json=payload,
-                    headers={"Content-Type": "application/json"},
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": self._api_key,
+                    },
                 )
 
             if response.status_code == 429:

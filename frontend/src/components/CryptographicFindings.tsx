@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { QuantumFinding } from '../types/scan';
-import { ShieldAlert, AlertTriangle, Info, CheckCircle2, Eye, EyeOff, Filter } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, Eye, EyeOff, Filter } from 'lucide-react';
 import { AIFindingExplainer } from './ai/AIFindingExplainer';
 
 interface CryptographicFindingsProps {

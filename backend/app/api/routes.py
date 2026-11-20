@@ -1080,9 +1080,16 @@ async def explain_report_endpoint(payload: ReportExplanationRequest):
     from app.services.report_service import build_complete_json_report
 
     profile = get_synthetic_profile_by_id(payload.system_id)
-    report_context = None
-    if profile:
-        rep = build_complete_json_report(payload.system_id)
-        report_context = rep.model_dump()
+    if not profile:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={
+                "error": "PROFILE_NOT_FOUND",
+                "detail": f"Banking system '{payload.system_id}' not found.",
+            },
+        )
+
+    rep = build_complete_json_report(payload.system_id)
+    report_context = rep.model_dump()
 
     return await DEFAULT_AI_SERVICE.explain_report(payload, report_context=report_context)

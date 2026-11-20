@@ -3,13 +3,9 @@ import type { BankingAsset, BankingRiskAssessment } from '../types/scan';
 import { BankingSystemCard } from './BankingSystemCard';
 import { getBankingProfiles, getBankingRiskRankings } from '../services/api';
 import {
-  Landmark,
-  ShieldAlert,
   Search,
   Filter,
   Info,
-  Layers,
-  Sparkles,
   Loader2,
   AlertCircle,
 } from 'lucide-react';
@@ -40,26 +36,35 @@ export const BankingSystemsCatalog: React.FC<BankingSystemsCatalogProps> = ({
 
   useEffect(() => {
     let isMounted = true;
-    setIsLoading(true);
+
     Promise.all([getBankingProfiles(), getBankingRiskRankings()])
       .then(([profilesData, risksData]) => {
         if (isMounted) {
           setProfiles(profilesData);
+
           const riskMap: Record<string, BankingRiskAssessment> = {};
+
           risksData.forEach((r) => {
             riskMap[r.asset_id] = r;
           });
+
           setRisks(riskMap);
           setError(null);
         }
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (isMounted) {
-          setError(err.message || 'Failed to load banking system profiles.');
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Failed to load banking system profiles.',
+          );
         }
       })
       .finally(() => {
-        if (isMounted) setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       });
 
     return () => {
@@ -72,16 +77,22 @@ export const BankingSystemsCatalog: React.FC<BankingSystemsCatalogProps> = ({
       p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (p.tags && p.tags.some((t) => t.toLowerCase().includes(searchTerm.toLowerCase())));
+      (p.tags &&
+        p.tags.some((t) =>
+          t.toLowerCase().includes(searchTerm.toLowerCase()),
+        ));
 
     const matchesCriticality =
-      selectedCriticality === 'ALL' || p.criticality === selectedCriticality;
+      selectedCriticality === 'ALL' ||
+      p.criticality === selectedCriticality;
 
     return matchesSearch && matchesCriticality;
   });
 
   const handleAudit = (profileId: string) => {
-    const suggestedDomain = PROFILE_DEFAULT_DOMAINS[profileId] || 'example.com';
+    const suggestedDomain =
+      PROFILE_DEFAULT_DOMAINS[profileId] || 'example.com';
+
     onAuditProfile(profileId, suggestedDomain);
   };
 
@@ -93,14 +104,18 @@ export const BankingSystemsCatalog: React.FC<BankingSystemsCatalogProps> = ({
           <span className="text-xs font-mono uppercase tracking-widest text-[#5755D9] font-semibold">
             BANKING SYSTEMS
           </span>
+
           <span className="text-slate-300">/</span>
+
           <span className="text-xs font-mono text-slate-500">
             {profiles.length} Profiles Modeled
           </span>
         </div>
+
         <h1 className="text-3xl sm:text-4xl font-light text-[#17181C] tracking-tight">
           Representative Banking Systems
         </h1>
+
         <p className="text-sm text-[#62656D] max-w-3xl leading-relaxed">
           Standardized financial infrastructure security models with multi-layer architecture,
           explicit evidence provenance (Observed vs Declared), key-protection hierarchies, and structured evidence gaps.
@@ -110,8 +125,11 @@ export const BankingSystemsCatalog: React.FC<BankingSystemsCatalogProps> = ({
       {/* Official Synthetic Environment Disclaimer */}
       <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/90 text-slate-700 text-xs flex items-start space-x-3">
         <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+
         <p className="leading-relaxed text-xs">
-          <strong className="text-slate-900 font-semibold">Synthetic Environment Disclaimer:</strong>{' '}
+          <strong className="text-slate-900 font-semibold">
+            Synthetic Environment Disclaimer:
+          </strong>{' '}
           QuantumShield's banking profiles are representative synthetic environments used to demonstrate security
           auditing and migration prioritization. They do not represent the actual architecture or configuration of
           any specific bank.
@@ -122,6 +140,7 @@ export const BankingSystemsCatalog: React.FC<BankingSystemsCatalogProps> = ({
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-xl bg-white border border-slate-200/90 shadow-xs text-xs">
         <div className="flex items-center space-x-2.5 w-full sm:w-auto flex-1 max-w-md px-3.5 py-2 rounded-lg bg-slate-50 border border-slate-200 focus-within:bg-white focus-within:border-[#5755D9] focus-within:ring-1 focus-within:ring-[#5755D9] transition">
           <Search className="w-4 h-4 text-slate-400 shrink-0" />
+
           <input
             type="text"
             value={searchTerm}
@@ -133,7 +152,11 @@ export const BankingSystemsCatalog: React.FC<BankingSystemsCatalogProps> = ({
 
         <div className="flex items-center space-x-2 w-full sm:w-auto">
           <Filter className="w-4 h-4 text-slate-500 shrink-0" />
-          <span className="text-slate-600 text-xs font-mono">Criticality:</span>
+
+          <span className="text-slate-600 text-xs font-mono">
+            Criticality:
+          </span>
+
           <select
             value={selectedCriticality}
             onChange={(e) => setSelectedCriticality(e.target.value)}
@@ -151,16 +174,25 @@ export const BankingSystemsCatalog: React.FC<BankingSystemsCatalogProps> = ({
       {isLoading && (
         <div className="p-12 text-center space-y-3">
           <Loader2 className="w-8 h-8 animate-spin text-[#5755D9] mx-auto" />
-          <p className="text-xs text-slate-500 font-mono">Loading representative banking profiles catalog...</p>
+
+          <p className="text-xs text-slate-500 font-mono">
+            Loading representative banking profiles catalog...
+          </p>
         </div>
       )}
 
       {error && (
         <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start space-x-3">
           <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+
           <div>
-            <div className="font-bold text-rose-900">Failed to load profiles</div>
-            <div className="text-rose-700 mt-0.5">{error}</div>
+            <div className="font-bold text-rose-900">
+              Failed to load profiles
+            </div>
+
+            <div className="text-rose-700 mt-0.5">
+              {error}
+            </div>
           </div>
         </div>
       )}

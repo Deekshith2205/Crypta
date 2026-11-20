@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { QuantumScore } from '../types/scan';
-import { ShieldAlert, ShieldCheck, Info, ChevronDown, ChevronUp, Layers, CheckCircle2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Layers } from 'lucide-react';
 
 interface ScoreCardProps {
   score: QuantumScore;

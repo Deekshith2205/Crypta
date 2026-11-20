@@ -43,7 +43,7 @@ export async function scanDomain(
       },
       body: JSON.stringify(payload),
     });
-  } catch (err: any) {
+  } catch {
     // If proxied fetch failed (e.g. backend running on :8000 directly), retry direct URL
     try {
       response = await fetch('http://127.0.0.1:8000/api/scan', {
@@ -78,7 +78,7 @@ export async function getBankingProfiles(): Promise<BankingSystemProfile[]> {
   let response: Response;
   try {
     response = await fetch(url);
-  } catch (err: any) {
+  } catch {
     try {
       response = await fetch('http://127.0.0.1:8000/api/banking/profiles');
     } catch {
@@ -99,7 +99,7 @@ export async function getBankingProfileById(id: string): Promise<BankingSystemPr
   let response: Response;
   try {
     response = await fetch(url);
-  } catch (err: any) {
+  } catch {
     try {
       response = await fetch(`http://127.0.0.1:8000/api/banking/profiles/${encodeURIComponent(id)}`);
     } catch {
@@ -120,7 +120,7 @@ export async function getBankingRiskRankings(): Promise<BankingRiskAssessment[]>
   let response: Response;
   try {
     response = await fetch(url);
-  } catch (err: any) {
+  } catch {
     try {
       response = await fetch('http://127.0.0.1:8000/api/banking/risk');
     } catch {
@@ -164,7 +164,7 @@ export async function getBankingProfileRisk(id: string): Promise<BankingRiskAsse
   let response: Response;
   try {
     response = await fetch(url);
-  } catch (err: any) {
+  } catch {
     try {
       response = await fetch(`http://127.0.0.1:8000/api/banking/profiles/${encodeURIComponent(id)}/risk`);
     } catch {
@@ -193,7 +193,7 @@ export async function simulateMigration(
       },
       body: JSON.stringify(request),
     });
-  } catch (err: any) {
+  } catch {
     try {
       response = await fetch('http://127.0.0.1:8000/api/banking/risk/what-if', {
         method: 'POST',

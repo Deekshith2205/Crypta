@@ -1,16 +1,17 @@
+
 import React, { useState, useEffect } from 'react';
-import type { BankingRiskAssessment } from '../types/scan';
-import { getBankingRiskRankings } from '../services/api';
+import type {
+  BankingRiskAssessment,
+  BankingSystemProfile,
+} from '../types/scan';
 import {
-  ShieldAlert,
+  getBankingProfiles,
+  getBankingRiskRankings,
+} from '../services/api';
+import {
   ArrowRight,
-  TrendingUp,
   AlertTriangle,
   Lock,
-  Layers,
-  Clock,
-  KeyRound,
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Loader2,
@@ -38,6 +39,7 @@ export const BankingRiskOverview: React.FC<BankingRiskOverviewProps> = ({
   onSimulateProfile,
 }) => {
   const [rankings, setRankings] = useState<BankingRiskAssessment[]>([]);
+  const [profiles, setProfiles] = useState<BankingSystemProfile[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>('BANK-PROF-CORE-BANKING');
@@ -45,21 +47,31 @@ export const BankingRiskOverview: React.FC<BankingRiskOverviewProps> = ({
 
   useEffect(() => {
     let isMounted = true;
-    setIsLoading(true);
-    getBankingRiskRankings()
-      .then((data) => {
+
+    Promise.all([
+      getBankingRiskRankings(),
+      getBankingProfiles(),
+    ])
+      .then(([rankingsData, profilesData]) => {
         if (isMounted) {
-          setRankings(data);
+          setRankings(rankingsData);
+          setProfiles(profilesData);
           setError(null);
         }
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (isMounted) {
-          setError(err.message || 'Failed to load banking risk rankings.');
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Failed to load banking risk rankings and profiles.'
+          );
         }
       })
       .finally(() => {
-        if (isMounted) setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       });
 
     return () => {
@@ -444,25 +456,17 @@ export const BankingRiskOverview: React.FC<BankingRiskOverviewProps> = ({
           })}
         </div>
       )}
+
       {/* Task 10: AI Banking Risk Modal */}
       {selectedAiRisk && (
         <AIBankingRiskModal
           isOpen={!!selectedAiRisk}
           onClose={() => setSelectedAiRisk(null)}
-          profile={{
-            id: selectedAiRisk.asset_id,
-            name: selectedAiRisk.asset_name,
-            asset_type: 'CORE_BANKING' as any,
-            criticality: selectedAiRisk.business_context.criticality as any,
-            data_sensitivity: selectedAiRisk.business_context.data_sensitivity as any,
-            data_lifetime: selectedAiRisk.business_context.data_lifetime as any,
-            exposure: selectedAiRisk.business_context.exposure as any,
-            migration_effort: selectedAiRisk.business_context.migration_effort as any,
-            description: selectedAiRisk.explanation,
-            trust_zone: 'RESTRICTED' as any,
-            cryptography: {} as any,
-            compliance_tags: [],
-          }}
+          profile={
+            profiles.find(
+              (profile) => profile.id === selectedAiRisk.asset_id
+            ) ?? null
+          }
           risk={selectedAiRisk}
         />
       )}

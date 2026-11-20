@@ -11,7 +11,7 @@ import { CryptographicFindings } from '../CryptographicFindings';
 import { MigrationRoadmap } from '../MigrationRoadmap';
 import { ObservabilityNotes } from '../ObservabilityNotes';
 import { BankingSystemCard } from '../BankingSystemCard';
-import { AlertCircle, CheckCircle2, Shield, ArrowUpRight } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 
 interface HomePageProps {
   onScan: (domain: string, port: number, probePqc?: boolean, assetId?: string) => void;
@@ -22,7 +22,6 @@ interface HomePageProps {
   errorMessage: string | null;
   onSelectView: (view: 'scanner' | 'catalog' | 'risk' | 'simulator') => void;
   onOpenSimulator: (assetId: string) => void;
-  onAuditProfile: (profileId: string, domain?: string) => void;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
@@ -34,7 +33,6 @@ export const HomePage: React.FC<HomePageProps> = ({
   errorMessage,
   onSelectView,
   onOpenSimulator,
-  onAuditProfile,
 }) => {
   const resultsRef = useRef<HTMLDivElement>(null);
 

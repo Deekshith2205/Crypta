@@ -43,11 +43,10 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => onSelectView('scanner')}
-            className={`font-medium transition-colors cursor-pointer py-1 relative ${
-              activeView === 'scanner'
+            className={`font-medium transition-colors cursor-pointer py-1 relative ${activeView === 'scanner'
                 ? 'text-[#0F172A] font-semibold after:absolute after:bottom-[-29px] after:left-0 after:right-0 after:h-[2px] after:bg-[#5755D9] after:rounded-full'
                 : 'text-slate-600 hover:text-slate-900'
-            }`}
+              }`}
           >
             Scanner
           </button>
@@ -55,11 +54,10 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => onSelectView('catalog')}
-            className={`font-medium transition-colors cursor-pointer py-1 relative ${
-              activeView === 'catalog'
+            className={`font-medium transition-colors cursor-pointer py-1 relative ${activeView === 'catalog'
                 ? 'text-[#0F172A] font-semibold after:absolute after:bottom-[-29px] after:left-0 after:right-0 after:h-[2px] after:bg-[#5755D9] after:rounded-full'
                 : 'text-slate-600 hover:text-slate-900'
-            }`}
+              }`}
           >
             Banking Systems
           </button>
@@ -67,11 +65,10 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => onSelectView('risk')}
-            className={`font-medium transition-colors cursor-pointer py-1 relative ${
-              activeView === 'risk'
+            className={`font-medium transition-colors cursor-pointer py-1 relative ${activeView === 'risk'
                 ? 'text-[#0F172A] font-semibold after:absolute after:bottom-[-29px] after:left-0 after:right-0 after:h-[2px] after:bg-[#5755D9] after:rounded-full'
                 : 'text-slate-600 hover:text-slate-900'
-            }`}
+              }`}
           >
             Prioritization Engine
           </button>
@@ -79,11 +76,10 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => onSelectView('simulator')}
-            className={`font-medium transition-colors cursor-pointer py-1 relative ${
-              activeView === 'simulator'
+            className={`font-medium transition-colors cursor-pointer py-1 relative ${activeView === 'simulator'
                 ? 'text-[#0F172A] font-semibold after:absolute after:bottom-[-29px] after:left-0 after:right-0 after:h-[2px] after:bg-[#5755D9] after:rounded-full'
                 : 'text-slate-600 hover:text-slate-900'
-            }`}
+              }`}
           >
             What-If Simulator
           </button>
@@ -91,11 +87,10 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => onSelectView('upgrade-plan')}
-            className={`font-medium transition-colors cursor-pointer py-1 relative ${
-              activeView === 'upgrade-plan'
+            className={`font-medium transition-colors cursor-pointer py-1 relative ${activeView === 'upgrade-plan'
                 ? 'text-[#0F172A] font-semibold after:absolute after:bottom-[-29px] after:left-0 after:right-0 after:h-[2px] after:bg-[#5755D9] after:rounded-full'
                 : 'text-slate-600 hover:text-slate-900'
-            }`}
+              }`}
           >
             Upgrade Plan
           </button>
@@ -152,36 +147,32 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="md:hidden flex items-center justify-around border-t border-slate-100 px-3 py-2 bg-[#FCFCFA]/95 text-xs">
         <button
           onClick={() => onSelectView('scanner')}
-          className={`py-1 px-2 rounded font-medium ${
-            activeView === 'scanner' ? 'text-[#5755D9] font-semibold' : 'text-slate-600'
-          }`}
+          className={`py-1 px-2 rounded font-medium ${activeView === 'scanner' ? 'text-[#5755D9] font-semibold' : 'text-slate-600'
+            }`}
         >
           Scanner
         </button>
 
         <button
           onClick={() => onSelectView('catalog')}
-          className={`py-1 px-2 rounded font-medium ${
-            activeView === 'catalog' ? 'text-[#5755D9] font-semibold' : 'text-slate-600'
-          }`}
+          className={`py-1 px-2 rounded font-medium ${activeView === 'catalog' ? 'text-[#5755D9] font-semibold' : 'text-slate-600'
+            }`}
         >
           Banking (5)
         </button>
 
         <button
           onClick={() => onSelectView('risk')}
-          className={`py-1 px-2 rounded font-medium ${
-            activeView === 'risk' ? 'text-[#5755D9] font-semibold' : 'text-slate-600'
-          }`}
+          className={`py-1 px-2 rounded font-medium ${activeView === 'risk' ? 'text-[#5755D9] font-semibold' : 'text-slate-600'
+            }`}
         >
           Priority
         </button>
 
         <button
           onClick={() => onSelectView('simulator')}
-          className={`py-1 px-2 rounded font-medium ${
-            activeView === 'simulator' ? 'text-[#5755D9] font-semibold' : 'text-slate-600'
-          }`}
+          className={`py-1 px-2 rounded font-medium ${activeView === 'simulator' ? 'text-[#5755D9] font-semibold' : 'text-slate-600'
+            }`}
         >
           What-If
         </button>
@@ -189,11 +180,10 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           type="button"
           onClick={() => onSelectView('upgrade-plan')}
-          className={`py-1 px-2 rounded font-medium ${
-            activeView === 'upgrade-plan'
+          className={`py-1 px-2 rounded font-medium ${activeView === 'upgrade-plan'
               ? 'text-[#5755D9] font-semibold'
               : 'text-slate-600'
-          }`}
+            }`}
         >
           Upgrade
         </button>

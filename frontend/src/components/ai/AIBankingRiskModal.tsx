@@ -1,14 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from 'react';
 import {
   X,
   Sparkles,
-  ShieldAlert,
   AlertCircle,
   CheckCircle2,
-  RefreshCw,
-  HelpCircle,
-  Layers,
-  ArrowRight,
 } from 'lucide-react';
 import { explainBankingRisk } from '../../services/api';
 import type {
@@ -31,57 +32,152 @@ export const AIBankingRiskModal: React.FC<AIBankingRiskModalProps> = ({
   profile,
   risk,
 }) => {
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [explanation, setExplanation] = useState<BankingRiskExplanationResponse | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isUnavailable, setIsUnavailable] = useState<boolean>(false);
+  const [explanationState, setExplanationState] = useState<{
+    identity: string;
+    data: BankingRiskExplanationResponse;
+  } | null>(null);
+
+  const [errorState, setErrorState] = useState<{
+    identity: string;
+    message: string;
+    unavailable: boolean;
+  } | null>(null);
+
+  const requestGeneration = useRef(0);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const requestPayload = useMemo(() => {
+    if (!profile || !risk || profile.id !== risk.asset_id) {
+      return null;
+    }
+
+    return {
+      system_id: profile.id,
+      system_name: profile.name,
+      priority_score: risk.priority_score,
+      priority_band: risk.priority_band_label,
+      quantum_risk_level:
+        risk.technical_risk?.quantum_risk_label || 'HIGH',
+      classical_risk_level:
+        risk.technical_risk?.classical_risk_label || 'MEDIUM',
+      criticality: String(profile.criticality || 'HIGH'),
+      data_sensitivity: String(profile.data_sensitivity || 'HIGH'),
+      data_lifetime: String(profile.data_lifetime || 'LONG'),
+      exposure: String(profile.exposure || 'INTERNAL'),
+      migration_effort: String(profile.migration_effort || 'MEDIUM'),
+      top_findings: (risk.contributors || []).map(
+        (contributor) =>
+          contributor.label ||
+          contributor.factor ||
+          contributor.description ||
+          'Unspecified risk contributor'
+      ),
+      weak_links: risk.key_protection?.weak_links || [],
+      evidence_gaps: (profile.evidence_gaps || []).map(
+        (gap) => gap.description
+      ),
+    };
+  }, [profile, risk]);
+
+  const requestIdentity = requestPayload
+    ? JSON.stringify(requestPayload)
+    : null;
+
+  const explanation =
+    explanationState?.identity === requestIdentity
+      ? explanationState.data
+      : null;
+
+  const errorMessage =
+    errorState?.identity === requestIdentity
+      ? errorState.message
+      : null;
+
+  const isUnavailable =
+    errorState?.identity === requestIdentity
+      ? errorState.unavailable
+      : false;
+
+  const hasValidSelection = Boolean(requestPayload);
+
+  const isLoading =
+    isOpen &&
+    hasValidSelection &&
+    !explanation &&
+    !errorMessage &&
+    !isUnavailable;
+
+  const loadExplanation = useCallback(
+    async (generation: number) => {
+      if (!requestPayload || !requestIdentity) return;
+
+      try {
+        const result: AIExplanationResult<BankingRiskExplanationResponse> =
+          await explainBankingRisk(requestPayload);
+
+        if (generation !== requestGeneration.current) return;
+
+        if (result.success && result.data) {
+          setExplanationState({
+            identity: requestIdentity,
+            data: result.data,
+          });
+        } else if (!result.is_available) {
+          setErrorState({
+            identity: requestIdentity,
+            message:
+              result.error ||
+              'AI provider is not configured. Configure GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY to enable.',
+            unavailable: true,
+          });
+        } else {
+          setErrorState({
+            identity: requestIdentity,
+            message: result.error || 'Unable to generate risk explanation.',
+            unavailable: false,
+          });
+        }
+      } catch (err: unknown) {
+        if (generation !== requestGeneration.current) return;
+
+        setErrorState({
+          identity: requestIdentity,
+          message:
+            err instanceof Error
+              ? err.message
+              : 'An unexpected error occurred while communicating with the AI service.',
+          unavailable: false,
+        });
+      }
+    },
+    [requestPayload, requestIdentity]
+  );
 
   useEffect(() => {
-    if (isOpen && profile && risk && !explanation) {
-      loadExplanation();
-    }
-  }, [isOpen, profile, risk]);
+    if (!isOpen || !hasValidSelection) return;
 
-  const loadExplanation = async () => {
-    if (!profile || !risk) return;
+    const generation = ++requestGeneration.current;
 
-    setIsLoading(true);
-    setErrorMessage(null);
-    setIsUnavailable(false);
+    const timeoutId = window.setTimeout(() => {
+      void loadExplanation(generation);
+    }, 0);
 
-    try {
-      const payload = {
-        system_id: profile.id,
-        system_name: profile.name,
-        priority_score: risk.priority_score,
-        priority_band: risk.priority_band_label,
-        quantum_risk_level: risk.technical_risk?.quantum_risk_label || 'HIGH',
-        classical_risk_level: risk.technical_risk?.classical_risk_label || 'MEDIUM',
-        criticality: String(profile.criticality || 'HIGH'),
-        data_sensitivity: String(profile.data_sensitivity || 'HIGH'),
-        data_lifetime: String(profile.data_lifetime || 'LONG'),
-        exposure: String(profile.exposure || 'INTERNAL'),
-        migration_effort: String(profile.migration_effort || 'MEDIUM'),
-        top_findings: (risk.contributors || []).map((c) => c.title),
-        weak_links: risk.key_protection?.weak_links || [],
-        evidence_gaps: (profile.evidence_gaps || []).map((g) => g.description),
-      };
+    return () => {
+      window.clearTimeout(timeoutId);
+      requestGeneration.current += 1;
+    };
+  }, [
+    isOpen,
+    hasValidSelection,
+    requestIdentity,
+    retryCount,
+    loadExplanation,
+  ]);
 
-      const result: AIExplanationResult<BankingRiskExplanationResponse> = await explainBankingRisk(payload);
-
-      if (result.success && result.data) {
-        setExplanation(result.data);
-      } else if (!result.is_available) {
-        setIsUnavailable(true);
-        setErrorMessage(result.error || 'AI provider is not configured. Configure GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY to enable.');
-      } else {
-        setErrorMessage(result.error || 'Unable to generate risk explanation.');
-      }
-    } catch (err: any) {
-      setErrorMessage(err.message || 'An unexpected error occurred while communicating with AI service.');
-    } finally {
-      setIsLoading(false);
-    }
+  const handleRetry = () => {
+    setExplanationState(null);
+    setErrorState(null);
+    setRetryCount((count) => count + 1);
   };
 
   if (!isOpen) return null;
@@ -89,150 +185,231 @@ export const AIBankingRiskModal: React.FC<AIBankingRiskModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
       <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
-        {/* Header */}
         <div className="px-6 py-4.5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-slate-50 via-white to-indigo-50/30">
           <div className="flex items-center space-x-2.5">
             <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-[#5755D9]">
               <Sparkles className="w-4 h-4 text-[#5755D9]" />
             </div>
             <div>
-              <div className="flex items-center space-x-2">
-                <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#5755D9]">
-                  AI Risk Reasoning
-                </span>
-                <span className="text-[11px] text-slate-400 font-mono">· {profile?.id}</span>
-              </div>
+              <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#5755D9]">
+                AI Banking Risk Intelligence
+              </span>
               <h3 className="text-base font-bold text-slate-900 leading-tight">
-                {profile?.name} &mdash; Migration Priority Rationale
+                {profile?.name || 'Banking System'} — Risk Explanation
               </h3>
+              <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                {profile?.id || 'Unknown system'}
+              </p>
             </div>
           </div>
-
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+            className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+            aria-label="Close risk explanation"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Authoritative Badge Banner */}
-        <div className="px-6 py-2.5 bg-indigo-50/60 border-b border-indigo-100/60 flex items-center justify-between text-xs font-mono">
-          <div className="flex items-center space-x-2 text-indigo-950 font-medium">
-            <span>Authoritative Deterministic Priority:</span>
-            <span className="px-2 py-0.5 rounded bg-[#5755D9] text-white font-bold">
-              {risk?.priority_score}/100 ({risk?.priority_band_label})
-            </span>
-          </div>
-          <span className="text-slate-500 hidden sm:inline text-[11px]">
-            AI explains, never recalculates
-          </span>
-        </div>
+        <div className="p-6 overflow-y-auto space-y-5">
+          {!hasValidSelection && (
+            <div className="p-5 rounded-xl border border-amber-200 bg-amber-50">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle className="w-5 h-5 text-amber-600" />
+                <h4 className="text-sm font-bold text-amber-900">
+                  Banking Profile Unavailable
+                </h4>
+              </div>
+              <p className="text-xs text-amber-800 leading-relaxed">
+                A matching banking profile and risk assessment are required
+                to generate an AI explanation. The deterministic risk
+                assessment has not been changed.
+              </p>
+            </div>
+          )}
 
-        {/* Content Body */}
-        <div className="p-6 overflow-y-auto space-y-5 text-xs text-slate-700">
+          {risk && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold block">
+                  Priority Score
+                </span>
+                <span className="text-xl font-bold text-slate-900">
+                  {risk.priority_score}
+                </span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold block">
+                  Priority Band
+                </span>
+                <span className="text-sm font-bold text-slate-900">
+                  {risk.priority_band_label}
+                </span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold block">
+                  Quantum Risk
+                </span>
+                <span className="text-sm font-bold text-slate-900">
+                  {risk.technical_risk?.quantum_risk_label || 'Unknown'}
+                </span>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <span className="text-[9px] uppercase tracking-wider text-slate-500 font-bold block">
+                  Criticality
+                </span>
+                <span className="text-sm font-bold text-slate-900">
+                  {profile?.criticality || 'Unknown'}
+                </span>
+              </div>
+            </div>
+          )}
+
           {isLoading && (
-            <div className="py-16 flex flex-col items-center justify-center space-y-3 text-center">
-              <div className="w-7 h-7 border-2 border-indigo-200 border-t-[#5755D9] rounded-full animate-spin" />
-              <p className="text-xs text-slate-600 font-mono">
-                Synthesizing multi-dimensional risk factors and queue placement reasoning...
+            <div className="py-14 flex flex-col items-center justify-center text-center">
+              <div className="w-10 h-10 rounded-full border-2 border-indigo-100 border-t-[#5755D9] animate-spin mb-4" />
+              <h4 className="text-sm font-bold text-slate-800">
+                Analyzing Banking Risk
+              </h4>
+              <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                Generating an AI explanation from the deterministic risk
+                assessment and available evidence.
               </p>
             </div>
           )}
 
-          {!isLoading && isUnavailable && (
-            <div className="p-5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 space-y-2">
-              <div className="flex items-center space-x-2 font-semibold text-sm">
-                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>AI Advisory Service Offline</span>
+          {isUnavailable && (
+            <div className="p-5 rounded-xl border border-amber-200 bg-amber-50">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle className="w-5 h-5 text-amber-600" />
+                <h4 className="text-sm font-bold text-amber-900">
+                  AI Provider Unavailable
+                </h4>
               </div>
-              <p className="text-xs leading-relaxed text-amber-800">
-                {errorMessage || 'AI provider is not configured. The deterministic banking risk score and priority band remain authoritative and fully operational.'}
+              <p className="text-xs text-amber-800 leading-relaxed">
+                {errorMessage}
               </p>
-              <div className="pt-2 text-[11px] font-mono text-amber-700">
-                Configure GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY in backend environment to enable intelligent explanations.
-              </div>
+              <p className="text-[10px] text-amber-700 mt-3">
+                The deterministic risk assessment remains available. AI is
+                optional and does not affect risk scores or findings.
+              </p>
             </div>
           )}
 
-          {!isLoading && errorMessage && !isUnavailable && (
-            <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center justify-between">
-              <span>{errorMessage}</span>
+          {errorMessage && !isUnavailable && (
+            <div className="p-5 rounded-xl border border-rose-200 bg-rose-50">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle className="w-5 h-5 text-rose-600" />
+                <h4 className="text-sm font-bold text-rose-900">
+                  Explanation Failed
+                </h4>
+              </div>
+              <p className="text-xs text-rose-800 leading-relaxed">
+                {errorMessage}
+              </p>
+            </div>
+          )}
+
+          {(errorMessage || isUnavailable) && (
+            <div className="flex justify-end">
               <button
                 type="button"
-                onClick={loadExplanation}
-                className="px-2.5 py-1 rounded bg-white border border-rose-300 text-rose-700 hover:bg-rose-100 transition cursor-pointer"
+                onClick={handleRetry}
+                className="px-4 py-2 rounded-lg bg-[#5755D9] text-white text-xs font-bold hover:bg-[#4644B8] transition cursor-pointer"
               >
-                Retry
+                Retry Explanation
               </button>
             </div>
           )}
 
-          {!isLoading && explanation && (
-            <div className="space-y-4">
-              {/* Score Rationale Card */}
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1.5">
-                <span className="text-[10px] uppercase font-mono font-bold text-slate-500 block">
-                  Deterministic Score Rationale
-                </span>
-                <p className="text-slate-800 leading-relaxed text-[13px]">{explanation.score_rationale}</p>
-              </div>
-
-              {/* Contributing Deterministic Factors */}
-              <div className="space-y-2">
-                <span className="text-[10px] uppercase font-mono font-bold text-slate-500 block">
-                  Contributing Factors from Risk Engine
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {explanation.contributing_factors.map((factor, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 rounded-lg bg-white border border-slate-200/80 flex items-start space-x-2"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-[#5755D9] shrink-0 mt-0.5" />
-                      <span className="text-slate-700 leading-normal">{factor}</span>
-                    </div>
-                  ))}
+          {explanation && (
+            <div className="space-y-5">
+              <div className="p-4 rounded-xl bg-indigo-50/70 border border-indigo-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle2 className="w-4 h-4 text-indigo-600" />
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-900">
+                    Risk Rationale
+                  </h4>
                 </div>
+                <p className="text-sm text-slate-700 leading-relaxed">
+                  {explanation.score_rationale}
+                </p>
               </div>
 
-              {/* Weighting & Queue Placement */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Contributing Factors
+                </h4>
+                <ul className="space-y-2">
+                  {explanation.contributing_factors.map((factor, index) => (
+                    <li
+                      key={`${factor}-${index}`}
+                      className="p-3 rounded-lg border border-slate-200 bg-white text-xs text-slate-700 leading-relaxed"
+                    >
+                      {factor}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                 <div className="p-3.5 rounded-xl bg-white border border-slate-200/80 space-y-1">
                   <span className="text-[10px] uppercase font-mono font-bold text-slate-500 block">
-                    Severity & Exposure Weighting
+                    Severity Weighting
                   </span>
-                  <p className="text-slate-700 leading-relaxed">
+                  <p className="text-xs text-slate-700 leading-relaxed">
                     {explanation.severity_weighting_explanation}
                   </p>
                 </div>
-
                 <div className="p-3.5 rounded-xl bg-white border border-slate-200/80 space-y-1">
-                  <span className="text-[10px] uppercase font-mono font-bold text-indigo-900 block">
-                    Upgrade Queue Placement Reason
+                  <span className="text-[10px] uppercase font-mono font-bold text-slate-500 block">
+                    Upgrade Queue Position
                   </span>
-                  <p className="text-slate-700 leading-relaxed">
+                  <p className="text-xs text-slate-700 leading-relaxed">
                     {explanation.upgrade_queue_position_reason}
                   </p>
                 </div>
               </div>
 
-              {/* Evidence Gaps & Next Steps */}
-              {explanation.evidence_gaps_needed && explanation.evidence_gaps_needed.length > 0 && (
-                <div className="p-3.5 rounded-xl bg-amber-50/50 border border-amber-200/70 space-y-2">
-                  <span className="text-[10px] uppercase font-mono font-bold text-amber-800 block">
-                    Internal Verification Gaps (Required to Confirm Posture)
-                  </span>
-                  <ul className="list-disc list-inside space-y-1 text-slate-700 text-[11px]">
-                    {explanation.evidence_gaps_needed.map((gap, idx) => (
-                      <li key={idx}>{gap}</li>
+              {explanation.supporting_evidence.length > 0 && (
+                <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-900 mb-2">
+                    Supporting Evidence
+                  </h4>
+                  <ul className="space-y-1.5">
+                    {explanation.supporting_evidence.map((item, index) => (
+                      <li
+                        key={`${item}-${index}`}
+                        className="text-xs text-emerald-800 flex gap-2"
+                      >
+                        <span>•</span>
+                        <span>{item}</span>
+                      </li>
                     ))}
                   </ul>
                 </div>
               )}
 
-              {/* Disclaimer */}
+              {explanation.evidence_gaps_needed.length > 0 && (
+                <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/50">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-amber-900 mb-2">
+                    Evidence Gaps
+                  </h4>
+                  <ul className="space-y-1.5">
+                    {explanation.evidence_gaps_needed.map((gap, index) => (
+                      <li
+                        key={`${gap}-${index}`}
+                        className="text-xs text-amber-800 flex gap-2"
+                      >
+                        <span>•</span>
+                        <span>{gap}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div className="p-2.5 rounded-lg bg-slate-100 text-slate-500 text-[10px] font-mono text-center">
                 {explanation.advisory_disclaimer}
               </div>
@@ -240,7 +417,6 @@ export const AIBankingRiskModal: React.FC<AIBankingRiskModalProps> = ({
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-3.5 border-t border-slate-100 bg-slate-50/80 flex items-center justify-between text-xs">
           <span className="text-slate-500 text-[11px] font-mono">
             Grounding: NIST FIPS 203/204/205 · NSA CNSA 2.0
@@ -257,4 +433,3 @@ export const AIBankingRiskModal: React.FC<AIBankingRiskModalProps> = ({
     </div>
   );
 };
-

@@ -16,6 +16,7 @@ Verifies:
 import json
 from unittest.mock import patch, AsyncMock
 import pytest
+from app.ai.providers.factory import get_ai_provider
 from starlette.testclient import TestClient
 
 from app.main import app
@@ -67,7 +68,20 @@ def test_ai_status_when_provider_is_configured():
         assert data["provider"] == "mock"
         assert data["model"] == "mock-quantum-advisor"
 
+@pytest.mark.parametrize(
+    "provider_name",
+    ["gemini", "openai", "anthropic"],
+)
+def test_provider_factory_falls_back_when_api_key_is_missing(provider_name):
+    """Missing provider credentials must produce a safe unavailable provider."""
 
+    settings = AISettings(provider=provider_name)
+
+    provider = get_ai_provider(settings)
+
+    assert isinstance(provider, NoneAIProvider)
+    assert provider.provider_name == "none"
+    assert provider.is_configured() is False
 # ============================================================================
 # 2. Intelligent Finding Explanations & Invariant Tests (Task 10.2)
 # ============================================================================
@@ -150,6 +164,81 @@ async def test_ai_rejects_oversized_input_before_provider_call():
 
     # The provider must never receive oversized input.
     provider.generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ai_migration_advisory_rejects_oversized_input_before_provider_call():
+    """Rejects oversized migration context before contacting the AI provider."""
+
+    provider = MockAIProvider()
+    provider.generate = AsyncMock(return_value="{}")
+
+    settings = AISettings(
+        provider="mock",
+        max_input_length=200,
+    )
+
+    service = QuantumReadinessAIService(
+        provider=provider,
+        settings=settings,
+    )
+
+    request = MigrationAdvisoryRequest(
+        system_id="BANK-PROF-CORE-BANKING",
+        system_name="Core Banking Engine",
+        baseline_priority_score=85,
+        baseline_priority_band="P0",
+        dependencies=["HSM firmware upgrade " * 100],
+    )
+
+    result = await service.advise_migration(request)
+
+    assert result.success is False
+    assert result.is_available is True
+    assert result.data is None
+    assert "configured limit of 200 characters" in result.error
+
+    # Oversized migration context must never reach the provider.
+    provider.generate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ai_provider_exception_does_not_leak_secrets(caplog):
+    """Provider exception details must not leak into logs or API results."""
+
+    synthetic_secret = "sk-test-DO-NOT-EXPOSE-123456"
+    provider = MockAIProvider()
+    provider.generate = AsyncMock(
+        side_effect=RuntimeError(
+            f"Authentication failed with token {synthetic_secret}"
+        )
+    )
+
+    service = QuantumReadinessAIService(provider=provider)
+
+    request = FindingExplanationRequest(
+        rule_id="TEST-SECRET-LEAK",
+        title="Secret leakage regression test",
+        value="RSA-2048",
+        role="KEY_EXCHANGE",
+        source="EXTERNAL_SCAN",
+        evidence_status="OBSERVED",
+        severity="HIGH",
+        risk="QUANTUM",
+        message="Test provider exception handling.",
+        recommendation="Verify the error remains sanitized.",
+    )
+
+    result = await service.explain_finding(request)
+
+    assert result.success is False
+    assert result.data is None
+    assert result.error is not None
+    assert synthetic_secret not in result.error
+    assert synthetic_secret not in caplog.text
+    assert "internal error" in result.error.lower()
+
+    provider.generate.assert_awaited_once()
 
 
 def test_ai_explain_finding_preserves_not_observable_invariant():
@@ -259,8 +348,9 @@ def test_ai_explain_banking_risk():
 # 4. AI Migration Advisor Tests (Task 10.4)
 # ============================================================================
 
+
 def test_ai_migration_advisory():
-    """Verifies migration advisory provides standards-based guidance and phases."""
+    """Verifies complete, standards-based migration advisory and deterministic identity."""
     mock_service = QuantumReadinessAIService(provider=MockAIProvider())
     payload = {
         "system_id": "BANK-PROF-CORE-BANKING",
@@ -277,23 +367,108 @@ def test_ai_migration_advisory():
         "migration_impact": "HIGH",
         "dependencies": ["FIPS 140-3 HSM Firmware Upgrade"],
     }
+
     with patch("app.api.routes.DEFAULT_AI_SERVICE", mock_service):
         response = client.post("/api/ai/advisory/migration", json=payload)
-        assert response.status_code == 200
-        result = response.json()
-        assert result["success"] is True
 
-        data = result["data"]
-        assert data["system_id"] == "BANK-PROF-CORE-BANKING"
-        assert "FIPS 203" in data["pqc_direction"] or "ML-KEM" in data["pqc_direction"]
-        assert len(data["suggested_migration_phases"]) >= 3
-        assert len(data["pre_deployment_validation_steps"]) >= 2
-        assert "operational_impact_assessment" in data
+    assert response.status_code == 200
+    result = response.json()
+    assert result["success"] is True
+    assert result["data"] is not None
+
+    data = result["data"]
+
+    # Deterministic identity must override provider-generated identity.
+    assert data["system_id"] == payload["system_id"]
+    assert data["system_name"] == payload["system_name"]
+
+    # Verify all advisory response fields are present and populated.
+    assert data["migration_justification"].strip()
+    assert len(data["target_cryptographic_roles"]) >= 1
+    assert "FIPS 203" in data["pqc_direction"] or "ML-KEM" in data["pqc_direction"]
+    assert data["operational_impact_assessment"].strip()
+    assert data["interoperability_and_testing"].strip()
+    assert len(data["suggested_migration_phases"]) >= 3
+    assert len(data["pre_deployment_validation_steps"]) >= 2
+
+    # Disclaimer must be controlled by the application, not the AI provider.
+    assert data["advisory_disclaimer"] == DEFAULT_ADVISORY_DISCLAIMER
+    assert result["disclaimer"] == DEFAULT_ADVISORY_DISCLAIMER
+
+
+@pytest.mark.parametrize("projected_score", [-1, 101])
+def test_ai_migration_advisory_rejects_out_of_range_projected_score(projected_score):
+    """Rejects projected priority scores outside the deterministic 0-100 range."""
+    payload = {
+        "system_id": "BANK-PROF-CORE-BANKING",
+        "system_name": "Core Banking Engine",
+        "baseline_priority_score": 85,
+        "baseline_priority_band": "P0",
+        "projected_priority_score": projected_score,
+    }
+
+    response = client.post("/api/ai/advisory/migration", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_ai_migration_advisory_optional_request_defaults():
+    """Preserves safe defaults when optional migration context is omitted."""
+    request = MigrationAdvisoryRequest(
+        system_id="BANK-PROF-CORE-BANKING",
+        system_name="Core Banking Engine",
+        baseline_priority_score=85,
+        baseline_priority_band="P0",
+    )
+
+    assert request.target_replacement is None
+    assert request.simulated_changes == []
+    assert request.projected_priority_score is None
+    assert request.projected_priority_band is None
+    assert request.crypto_agility == "NOT_OBSERVABLE"
+    assert request.migration_impact == "MEDIUM"
+    assert request.dependencies == []
+
 
 
 # ============================================================================
 # 5. AI Report Explanations & PDF/JSON Integration (Task 10.5)
 # ============================================================================
+def test_ai_explain_report_rejects_unknown_system_id():
+    """Report explanation must reject unknown banking profiles."""
+    response = client.post(
+        "/api/ai/explain/report",
+        json={"system_id": "BANK-PROF-DOES-NOT-EXIST"},
+    )
+
+    assert response.status_code == 404
+    result = response.json()
+    assert result["error"] == "PROFILE_NOT_FOUND"
+
+@pytest.mark.asyncio
+async def test_ai_explain_report_does_not_call_ai_when_report_generation_fails():
+    """AI must not run when deterministic report generation fails."""
+    mock_service = QuantumReadinessAIService(
+        provider=MockAIProvider()
+    )
+    mock_service.explain_report = AsyncMock()
+
+    with (
+        patch(
+            "app.services.report_service.build_complete_json_report"
+        ) as mock_report,
+        patch("app.api.routes.DEFAULT_AI_SERVICE", mock_service),
+    ):
+        mock_report.side_effect = RuntimeError("Synthetic report failure")
+
+        with pytest.raises(RuntimeError, match="Synthetic report failure"):
+            client.post(
+                "/api/ai/explain/report",
+                json={"system_id": "BANK-PROF-CORE-BANKING"},
+            )
+
+    mock_report.assert_called_once_with("BANK-PROF-CORE-BANKING")
+    mock_service.explain_report.assert_not_awaited()
 
 def test_ai_explain_report_endpoint():
     """Verifies report narrative generation endpoint."""
