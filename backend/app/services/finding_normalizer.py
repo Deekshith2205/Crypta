@@ -360,6 +360,18 @@ def normalize_profile_evidence_item(item: EvidenceItem, system_id: Optional[str]
     )
 
 
+def make_finding_dedup_key(norm: NormalizedFinding) -> tuple:
+    """Constructs a deterministic deduplication key preserving distinct roles, files, and lines."""
+    return (
+        norm.rule_id,
+        norm.value,
+        norm.role,
+        norm.source,
+        norm.source_file or "",
+        norm.source_line if norm.source_line is not None else -1,
+    )
+
+
 def collect_unified_findings(
     system_id: str,
     tls_findings: Optional[List[Any]] = None,
@@ -369,6 +381,7 @@ def collect_unified_findings(
 ) -> List[NormalizedFinding]:
     """
     Integrates findings across all 4 sources into a deduplicated, normalized collection.
+    Preserves distinct findings across roles, sources, files, and line numbers.
     """
     unified: List[NormalizedFinding] = []
     seen_keys = set()
@@ -377,7 +390,7 @@ def collect_unified_findings(
     if tls_findings:
         for f in tls_findings:
             norm = normalize_tls_finding(f, system_id=system_id)
-            dedup_key = (norm.rule_id, norm.value)
+            dedup_key = make_finding_dedup_key(norm)
             if dedup_key not in seen_keys:
                 seen_keys.add(dedup_key)
                 unified.append(norm)
@@ -386,7 +399,7 @@ def collect_unified_findings(
     if crypto_misuse_findings:
         for f in crypto_misuse_findings:
             norm = normalize_crypto_misuse_finding(f, system_id=system_id)
-            dedup_key = (norm.rule_id, norm.value)
+            dedup_key = make_finding_dedup_key(norm)
             if dedup_key not in seen_keys:
                 seen_keys.add(dedup_key)
                 unified.append(norm)
@@ -395,7 +408,7 @@ def collect_unified_findings(
     if config_findings:
         for f in config_findings:
             norm = normalize_config_finding(f, system_id=system_id)
-            dedup_key = (norm.rule_id, norm.value)
+            dedup_key = make_finding_dedup_key(norm)
             if dedup_key not in seen_keys:
                 seen_keys.add(dedup_key)
                 unified.append(norm)
@@ -404,7 +417,7 @@ def collect_unified_findings(
     if banking_profile and banking_profile.evidence_items:
         for item in banking_profile.evidence_items:
             norm = normalize_profile_evidence_item(item, system_id=system_id)
-            dedup_key = (norm.rule_id, norm.value)
+            dedup_key = make_finding_dedup_key(norm)
             if dedup_key not in seen_keys:
                 seen_keys.add(dedup_key)
                 unified.append(norm)
