@@ -649,3 +649,51 @@ QuantumShield incorporates a tamper-evident audit trail for all finalized bankin
 - **Suffix Truncation & External Checkpointing**: A hash chain alone does not detect deletion of the entire ledger suffix if an attacker rewrites the database file. QuantumShield records anchor checkpoints (`audit_checkpoints`), but external anchoring or off-site log streaming is required to detect full ledger truncation if both the DB and filesystem are compromised.
 - **Storage Protection**: SQLite persistence provides restart durability and transaction isolation, but does not provide hardware-enforced write-once-read-many (WORM) storage against an administrator or attacker with local write access to the SQLite file.
 - **No Blockchain Claims**: QuantumShield implements a deterministic hash-chained audit ledger, not a distributed consensus blockchain or absolute tamper-proof system.
+
+---
+
+## 14. Banking Quantum Readiness, Cryptographic Agility & Migration Engine (Phase D)
+
+Phase D delivers enterprise-grade post-quantum cryptography management and banking migration infrastructure across eight core capabilities:
+
+### 14.1 CycloneDX 1.7 Cryptographic Bill of Materials (CBOM)
+- **Deterministic Generation**: Generates standardized, machine-readable cryptographic asset inventories strictly conforming to CycloneDX 1.7.
+- **Pure Inventory Invariant**: Enforces strict separation between inventory documentation and risk evaluation. The CBOM represents raw cryptographic assets (algorithms, key lengths, modes, padding) and never pollutes inventory schemas with proprietary risk scores or priority bands.
+- **RFC 8785 Canonical Serialization**: Serializes normalized asset representations with stable key sorting and deterministic UTF-8 encoding.
+
+### 14.2 Static Code & Crypto-Misuse Scanner Hardening
+- **Zero Execution Invariant**: Strict AST and regex-based parsing across Python, Java, JavaScript/TypeScript, and PHP. The scanner never executes, imports, or compiles scanned source code.
+- **AES-256 Grover Resilience Invariant**: Grover's algorithm provides quadratic speedup, meaning AES-256 retains ~128 bits of effective quantum security. Bulk AES-256 symmetric encryption is recognized as quantum-safe and is never classified as a quantum vulnerability.
+- **Risk Category Separation**: Enforces strict separation between Classical Security (`MISUSE-ECB-MODE`, `MISUSE-MD5-HASH`), Implementation Flaws (`MISUSE-STATIC-IV`, `MISUSE-STATIC-NONCE`), Secret Exposure (`MISUSE-HARDCODED-KEY`), and Quantum Exposure (`MISUSE-HARDCODED-RSA-KEX`, `MISUSE-HARDCODED-ECDH-KEX`).
+
+### 14.3 Multi-Tier Key Protection Chain & Agility Engine
+- **4-Tier Cryptographic Hierarchy**: Traces dependencies across:
+  1. *Data Encryption At-Rest*: Symmetrical bulk payload protection (AES-256-GCM).
+  2. *Key Wrapping / KEK*: Asymmetric or symmetric key encapsulation (ML-KEM-768 / AES-256-KW).
+  3. *Key Storage Facility*: Hardware/cloud key isolation (Certified HSM / Cloud KMS).
+  4. *Root Authentication*: Master key and certificate signatures (ML-DSA-65 / SLH-DSA-128s).
+- **Weak Link Isolation**: Accurately pinpoints that quantum vulnerabilities reside in asymmetric key wrapping and authentication, not AES-256.
+- **Deterministic Agility Scoring**: Computes a 0–100 Cryptographic Agility Score evaluating modularity, algorithm parameterization, and provider decoupling.
+
+### 14.4 Deterministic What-If Migration Simulator
+- **Hypothetical Modeling**: Simulates post-quantum substitutions (e.g., RSA-2048 $\to$ ML-KEM-768, ECDSA $\to$ ML-DSA-65) against temporary memory structures.
+- **Strict Immutability**: Guarantees zero mutation of baseline assets, persistent profiles, or database state.
+- **Delta Analysis**: Recalculates priority scores, risk reduction, resolved findings, and remaining dependencies using the exact deterministic risk engine.
+
+### 14.5 NIST SP 800-207 Zero-Trust Architecture Integration
+- **Six Standard Pillars**: Formalizes Identity, Device Context, Resource, Policy Decision Point, Least Privilege, and Continuous Verification.
+- **Observability Honesty (`NOT_OBSERVABLE != VULNERABLE`)**: Edge network scanners cannot passively verify internal authorization policies. Internal controls default honestly to `NOT_OBSERVABLE_EXTERNALLY` without penalizing security posture or assigning artificial vulnerabilities.
+
+### 14.6 Unified Banking Assessment & Executive Compliance Reporting
+- **Comprehensive Artifact Assembly**: Combines CBOM, Zero Trust, Key Protection Chain, What-If projection, and Sealed Audit into an integrated report generator.
+- **Standards Compliance Mappings**: Maps technical findings directly to:
+  - **NIST SP 800-227**: Recommendations for Cryptographic Key Management & Transition.
+  - **NSA CNSA 2.0**: Commercial National Security Algorithm Suite mandates.
+  - **NIST FIPS 203**: Module-Lattice-Based Key-Encapsulation Mechanism (ML-KEM).
+  - **NIST FIPS 204**: Module-Lattice-Based Digital Signature Algorithm (ML-DSA).
+  - **NIST FIPS 205**: Stateless Hash-Based Digital Signature Algorithm (SLH-DSA).
+
+### 14.7 End-to-End Frontend Banking Readiness & Migration Integration
+- **Interactive Visualizations**: Renders 4-tier Key Protection Chain hierarchies, cryptographic agility badges, and Zero Trust compliance cards.
+- **What-If Sandbox UI**: Interactive playground allowing CISOs to model cryptographic upgrades and visualize immediate priority score reductions.
+- **Full Quality Assurance**: Validated with zero TypeScript errors, zero lint warnings (`oxlint`), passing Vitest component suites, and production-optimized asset builds.
