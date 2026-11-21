@@ -2,8 +2,19 @@
 Provides cryptographic tamper evidence and verifiable integrity chains for assessments.
 """
 
+from enum import Enum
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field
+
+
+class AuditVerificationStatus(str, Enum):
+    VALID = "VALID"
+    INVALID_SIGNATURE = "INVALID_SIGNATURE"
+    PAYLOAD_HASH_MISMATCH = "PAYLOAD_HASH_MISMATCH"
+    CHAIN_BROKEN = "CHAIN_BROKEN"
+    RECORD_NOT_IN_LEDGER = "RECORD_NOT_IN_LEDGER"
+    LEDGER_CORRUPTED = "LEDGER_CORRUPTED"
+    VERIFICATION_ERROR = "VERIFICATION_ERROR"
 
 
 class AuditRecord(BaseModel):
@@ -24,6 +35,7 @@ class AuditRecord(BaseModel):
 class AuditVerificationResult(BaseModel):
     """Result of verifying a single audit record or chain."""
     valid: bool = Field(..., description="True if cryptographic verification succeeded")
+    status: str = Field(default=AuditVerificationStatus.VALID.value, description="Explicit verification outcome status code")
     record_id: Optional[str] = Field(default=None, description="Record identifier verified")
     error: Optional[str] = Field(default=None, description="Reason for validation failure if invalid")
     records_checked: int = Field(default=1, description="Number of chained records verified")

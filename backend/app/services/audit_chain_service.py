@@ -4,11 +4,12 @@ Uses SHA-256 over RFC 8785 compliant canonical JSON representations.
 """
 
 import hashlib
+import hmac
 import json
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Union
-from app.models.audit_chain import AuditRecord, AuditVerificationResult
+from app.models.audit_chain import AuditRecord, AuditVerificationResult, AuditVerificationStatus
 
 GENESIS_PREVIOUS_HASH: str = "0" * 64
 
@@ -175,99 +176,205 @@ class AuditChainService:
         self,
         record: AuditRecord,
         assessment_data: Optional[Any] = None,
+        check_ledger: Optional[bool] = None,
     ) -> AuditVerificationResult:
         """
         Verifies the cryptographic integrity of a single audit record.
-        Detects:
-        - Payload tampering (assessment_hash mismatch)
-        - Current hash mismatch
+        Validates:
+        1. Required metadata integrity
+        2. Payload content hash (assessment_hash)
+        3. Current hash linkage (current_hash)
+        4. HMAC-SHA256 signature
+        5. Persistent ledger membership
         """
         try:
+            # Step 0: Check mandatory metadata fields
+            if (
+                not record.record_id
+                or not record.current_hash
+                or not record.timestamp
+                or not record.assessment_id
+                or not record.assessment_hash
+            ):
+                return AuditVerificationResult(
+                    valid=False,
+                    status=AuditVerificationStatus.VERIFICATION_ERROR.value,
+                    record_id=getattr(record, "record_id", None),
+                    error="Audit record is missing mandatory cryptographic fields.",
+                )
+
             # Step 1: Verify canonical payload against assessment_data if provided
             if assessment_data is not None:
                 recalculated_canonical = canonicalize_json(assessment_data, strip_volatile=True)
                 recalculated_a_hash = compute_sha256(recalculated_canonical)
-                if recalculated_a_hash != record.assessment_hash:
+                if not hmac.compare_digest(recalculated_a_hash, record.assessment_hash):
                     alt_raw = compute_sha256(canonicalize_json(assessment_data, strip_volatile=False))
-                    if alt_raw == record.assessment_hash:
+                    if hmac.compare_digest(alt_raw, record.assessment_hash):
                         recalculated_a_hash = alt_raw
-                if recalculated_a_hash != record.assessment_hash:
+                if not hmac.compare_digest(recalculated_a_hash, record.assessment_hash):
                     return AuditVerificationResult(
                         valid=False,
+                        status=AuditVerificationStatus.PAYLOAD_HASH_MISMATCH.value,
                         record_id=record.record_id,
                         error=f"Assessment data tampering detected! Recalculated hash {recalculated_a_hash} != recorded hash {record.assessment_hash}",
                         details={"expected_hash": record.assessment_hash, "computed_hash": recalculated_a_hash},
                     )
             elif record.canonical_payload:
                 recalculated_a_hash = compute_sha256(record.canonical_payload)
-                if recalculated_a_hash != record.assessment_hash:
+                if not hmac.compare_digest(recalculated_a_hash, record.assessment_hash):
                     try:
                         parsed = json.loads(record.canonical_payload)
                         alt_hash = compute_payload_hash(parsed)
-                        if alt_hash == record.assessment_hash:
+                        if hmac.compare_digest(alt_hash, record.assessment_hash):
                             recalculated_a_hash = alt_hash
                     except Exception:
                         pass
-                if recalculated_a_hash != record.assessment_hash:
+                if not hmac.compare_digest(recalculated_a_hash, record.assessment_hash):
                     return AuditVerificationResult(
                         valid=False,
+                        status=AuditVerificationStatus.PAYLOAD_HASH_MISMATCH.value,
                         record_id=record.record_id,
                         error="Canonical payload does not match assessment_hash. Record modified in storage.",
                         details={"expected_hash": record.assessment_hash, "computed_hash": recalculated_a_hash},
                     )
 
             # Step 2: Verify current_hash = SHA256(canonical_payload + previous_hash)
-            payload = record.canonical_payload or (canonicalize_json(assessment_data) if assessment_data is not None else "")
+            payload = record.canonical_payload or (canonicalize_json(assessment_data, strip_volatile=True) if assessment_data is not None else "")
             recalculated_current = compute_sha256(payload + record.previous_hash)
 
-            if recalculated_current != record.current_hash:
+            if not hmac.compare_digest(recalculated_current, record.current_hash):
+                if assessment_data is not None:
+                    alt_current = compute_sha256(canonicalize_json(assessment_data, strip_volatile=False) + record.previous_hash)
+                    if hmac.compare_digest(alt_current, record.current_hash):
+                        recalculated_current = alt_current
+            if not hmac.compare_digest(recalculated_current, record.current_hash):
                 return AuditVerificationResult(
                     valid=False,
+                    status=AuditVerificationStatus.CHAIN_BROKEN.value,
                     record_id=record.record_id,
                     error=f"Cryptographic hash chain signature invalid! Recalculated current_hash {recalculated_current} != {record.current_hash}",
                     details={"expected_hash": record.current_hash, "computed_hash": recalculated_current},
                 )
 
+            # Step 3: Verify HMAC-SHA256 signature
+            if not record.signature:
+                return AuditVerificationResult(
+                    valid=False,
+                    status=AuditVerificationStatus.INVALID_SIGNATURE.value,
+                    record_id=record.record_id,
+                    error="Audit record signature is missing.",
+                    details={"record_id": record.record_id},
+                )
+
+            sig_material = f"{record.record_id}:{record.assessment_id}:{record.assessment_hash}:{record.previous_hash}:{record.current_hash}:{record.timestamp}".encode("utf-8")
+            if not self._key_manager.verify(sig_material, record.signature):
+                return AuditVerificationResult(
+                    valid=False,
+                    status=AuditVerificationStatus.INVALID_SIGNATURE.value,
+                    record_id=record.record_id,
+                    error="Audit record signature verification failed.",
+                    details={"record_id": record.record_id},
+                )
+
+            # Step 4: Persistent ledger membership check
+            should_check_ledger = check_ledger if check_ledger is not None else (self._storage is not None)
+            if should_check_ledger:
+                if self._storage is not None:
+                    stored = self._storage.get_record_by_id(record.record_id)
+                    if stored is None:
+                        return AuditVerificationResult(
+                            valid=False,
+                            status=AuditVerificationStatus.RECORD_NOT_IN_LEDGER.value,
+                            record_id=record.record_id,
+                            error="Valid signature, but record is not present in the verified audit ledger.",
+                            details={"record_id": record.record_id, "in_ledger": False},
+                        )
+                    if not hmac.compare_digest(stored.current_hash, record.current_hash) or not hmac.compare_digest(stored.assessment_hash, record.assessment_hash):
+                        return AuditVerificationResult(
+                            valid=False,
+                            status=AuditVerificationStatus.LEDGER_CORRUPTED.value,
+                            record_id=record.record_id,
+                            error="Record content does not match persistent ledger copy.",
+                            details={"stored_hash": stored.current_hash, "presented_hash": record.current_hash},
+                        )
+                elif self._in_memory_fallback:
+                    in_mem = next((r for r in self._in_memory_fallback if r.record_id == record.record_id), None)
+                    if in_mem is None:
+                        return AuditVerificationResult(
+                            valid=False,
+                            status=AuditVerificationStatus.RECORD_NOT_IN_LEDGER.value,
+                            record_id=record.record_id,
+                            error="Valid signature, but record is not present in the verified audit ledger.",
+                            details={"record_id": record.record_id, "in_ledger": False},
+                        )
+                    if not hmac.compare_digest(in_mem.current_hash, record.current_hash):
+                        return AuditVerificationResult(
+                            valid=False,
+                            status=AuditVerificationStatus.LEDGER_CORRUPTED.value,
+                            record_id=record.record_id,
+                            error="Record content does not match in-memory ledger copy.",
+                            details={"stored_hash": in_mem.current_hash, "presented_hash": record.current_hash},
+                        )
+
             return AuditVerificationResult(
                 valid=True,
+                status=AuditVerificationStatus.VALID.value,
                 record_id=record.record_id,
                 records_checked=1,
-                details={"assessment_hash": record.assessment_hash, "current_hash": record.current_hash},
+                details={
+                    "assessment_hash": record.assessment_hash,
+                    "current_hash": record.current_hash,
+                    "signature_valid": True,
+                    "ledger_verified": bool(should_check_ledger and (self._storage is not None or self._in_memory_fallback)),
+                },
             )
         except Exception as e:
             return AuditVerificationResult(
                 valid=False,
-                record_id=record.record_id,
+                status=AuditVerificationStatus.VERIFICATION_ERROR.value,
+                record_id=getattr(record, "record_id", None),
                 error=f"Malformed audit record: {str(e)}",
             )
 
-    def verify_audit_chain(self, records: List[AuditRecord]) -> AuditVerificationResult:
+    def verify_audit_chain(
+        self,
+        records: List[AuditRecord],
+        check_ledger: bool = False,
+    ) -> AuditVerificationResult:
         """
         Verifies an entire sequence of chained audit records.
         Verifies:
-        1. Each record's internal hash integrity.
+        1. Each record's internal cryptographic validity and signature.
         2. Sequence continuity (record[i].previous_hash == record[i-1].current_hash).
         """
         if not records:
-            return AuditVerificationResult(valid=True, records_checked=0, details={"message": "Empty chain is valid"})
+            return AuditVerificationResult(
+                valid=True,
+                status=AuditVerificationStatus.VALID.value,
+                records_checked=0,
+                details={"message": "Empty chain is valid"},
+            )
 
         for i, rec in enumerate(records):
             # Verify internal record validity
-            res = self.verify_audit_record(rec)
+            res = self.verify_audit_record(rec, check_ledger=check_ledger)
             if not res.valid:
                 return AuditVerificationResult(
                     valid=False,
+                    status=res.status,
                     record_id=rec.record_id,
                     error=f"Record #{i} ({rec.record_id}) verification failed: {res.error}",
                     records_checked=i,
+                    details=res.details,
                 )
 
             # Check chain continuity
             if i > 0:
                 prev_rec = records[i - 1]
-                if rec.previous_hash != prev_rec.current_hash:
+                if not hmac.compare_digest(rec.previous_hash, prev_rec.current_hash):
                     return AuditVerificationResult(
                         valid=False,
+                        status=AuditVerificationStatus.CHAIN_BROKEN.value,
                         record_id=rec.record_id,
                         error=f"Broken audit hash chain at index {i}! Record previous_hash {rec.previous_hash} != prior record current_hash {prev_rec.current_hash}",
                         records_checked=i,
@@ -276,6 +383,7 @@ class AuditChainService:
 
         return AuditVerificationResult(
             valid=True,
+            status=AuditVerificationStatus.VALID.value,
             records_checked=len(records),
             details={
                 "chain_length": len(records),
@@ -283,6 +391,78 @@ class AuditChainService:
                 "genesis_hash": records[0].previous_hash,
             },
         )
+
+    def verify_ledger(self) -> AuditVerificationResult:
+        """
+        Verifies the full persistent audit ledger:
+        1. Validates entire chain sequence continuity from genesis to head.
+        2. Validates stored checkpoints.
+        """
+        try:
+            records = self.get_ledger()
+            if not records:
+                return AuditVerificationResult(
+                    valid=True,
+                    status=AuditVerificationStatus.VALID.value,
+                    records_checked=0,
+                    details={"message": "Audit ledger is empty."},
+                )
+
+            chain_res = self.verify_audit_chain(records, check_ledger=False)
+            if not chain_res.valid:
+                status = AuditVerificationStatus.LEDGER_CORRUPTED.value if chain_res.status in (
+                    AuditVerificationStatus.CHAIN_BROKEN.value,
+                    AuditVerificationStatus.PAYLOAD_HASH_MISMATCH.value,
+                    AuditVerificationStatus.INVALID_SIGNATURE.value,
+                ) else chain_res.status
+                return AuditVerificationResult(
+                    valid=False,
+                    status=status,
+                    record_id=chain_res.record_id,
+                    error=f"Audit ledger integrity corrupted: {chain_res.error}",
+                    records_checked=chain_res.records_checked,
+                    details=chain_res.details,
+                )
+
+            # Validate checkpoint if persistent storage is configured
+            if self._storage is not None and hasattr(self._storage, "get_latest_checkpoint"):
+                chk = self._storage.get_latest_checkpoint()
+                if chk is not None:
+                    if len(records) < chk["record_count"]:
+                        return AuditVerificationResult(
+                            valid=False,
+                            status=AuditVerificationStatus.LEDGER_CORRUPTED.value,
+                            error=f"Ledger truncation detected! Record count {len(records)} < checkpoint record count {chk['record_count']}.",
+                            records_checked=len(records),
+                        )
+                    chk_idx = chk["record_count"] - 1
+                    if chk_idx < len(records):
+                        chk_rec = records[chk_idx]
+                        if not hmac.compare_digest(chk_rec.current_hash, chk["head_hash"]):
+                            return AuditVerificationResult(
+                                valid=False,
+                                status=AuditVerificationStatus.LEDGER_CORRUPTED.value,
+                                record_id=chk_rec.record_id,
+                                error=f"Ledger checkpoint mismatch! Expected {chk['head_hash']}, got {chk_rec.current_hash}.",
+                                records_checked=len(records),
+                            )
+
+            return AuditVerificationResult(
+                valid=True,
+                status=AuditVerificationStatus.VALID.value,
+                records_checked=len(records),
+                details={
+                    "ledger_length": len(records),
+                    "head_hash": records[-1].current_hash,
+                    "genesis_hash": records[0].previous_hash,
+                },
+            )
+        except Exception as e:
+            return AuditVerificationResult(
+                valid=False,
+                status=AuditVerificationStatus.LEDGER_CORRUPTED.value,
+                error=f"Failed to verify ledger integrity: {str(e)}",
+            )
 
     def get_ledger(self) -> List[AuditRecord]:
         """Returns the audit ledger records."""
@@ -293,3 +473,25 @@ class AuditChainService:
 
 # Default singleton instance bound to persistent storage
 DEFAULT_AUDIT_CHAIN_SERVICE = AuditChainService(storage=DEFAULT_AUDIT_STORAGE)
+
+
+def seed_baseline_audit_records(service: Optional[AuditChainService] = None) -> None:
+    """
+    Seeds baseline synthetic profiles into the persistent ledger once on initialization
+    if any profile does not yet have a sealed audit record.
+    """
+    svc = service or DEFAULT_AUDIT_CHAIN_SERVICE
+    if svc._storage is None:
+        return
+    try:
+        from app.models.profiles import SYNTHETIC_BANKING_PROFILES
+        from app.services.report_service import build_complete_json_report
+        for profile in SYNTHETIC_BANKING_PROFILES:
+            if svc.get_latest_record_for_system(profile.id) is None:
+                build_complete_json_report(profile.id, seal_audit=True, audit_service=svc)
+    except Exception:
+        pass
+
+
+# Ensure baseline records are seeded if persistent ledger is empty
+seed_baseline_audit_records(DEFAULT_AUDIT_CHAIN_SERVICE)
