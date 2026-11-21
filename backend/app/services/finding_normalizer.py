@@ -7,6 +7,7 @@ Enforces strict evidence semantics: NOT_OBSERVABLE != VULNERABLE.
 from typing import List, Dict, Any, Optional
 from app.models.findings import NormalizedFinding
 from app.models.banking import BankingAsset, EvidenceItem
+from app.security.crypto_catalog import classify_risk_domain
 
 
 def sanitize_secret_value(val: str) -> str:
@@ -30,15 +31,16 @@ def normalize_tls_finding(finding: Any, system_id: Optional[str] = None) -> Norm
     ev = getattr(finding, "evidence", getattr(finding, "observability", getattr(finding, "evidence_status", "OBSERVED")))
 
     # Determine risk category (Quantum vs Classical)
-    threat = str(getattr(finding, "quantum_threat", getattr(finding, "quantum_threat_vector", ""))).upper()
-    title_u = title.upper()
-    val_u = val.upper()
-    if any(q in title_u or q in threat or q in val_u for q in ["SHOR", "QUANTUM", "PQC", "ML-KEM", "ML-DSA", "RSA", "ECDH", "ECDSA", "X25519"]):
-        risk = "QUANTUM"
-    elif any(c in title_u or c in threat or c in val_u for c in ["MD5", "SHA-1", "3DES", "RC4", "TLS 1.0", "TLS 1.1", "EXPIRED", "DES"]):
-        risk = "CLASSICAL"
-    else:
-        risk = "QUANTUM" if getattr(finding, "is_quantum_vulnerable", True) else "CLASSICAL"
+    threat = getattr(finding, "quantum_threat", getattr(finding, "quantum_threat_vector", None))
+    cat = getattr(finding, "category", None)
+    default_risk = "QUANTUM" if getattr(finding, "is_quantum_vulnerable", True) else "CLASSICAL"
+    risk = classify_risk_domain(
+        algorithm=val,
+        threat_vector=str(threat) if threat else None,
+        title=title,
+        category=str(cat) if cat else None,
+        default=default_risk,
+    )
 
     msg = getattr(finding, "security_impact", getattr(finding, "reason", getattr(finding, "message", title)))
     rec = getattr(finding, "recommendation", "Upgrade to post-quantum cryptographic standards.")
@@ -78,10 +80,19 @@ def normalize_crypto_misuse_finding(finding: Any, system_id: Optional[str] = Non
     sev = str(getattr(finding, "severity", "HIGH")).upper()
     
     raw_risk = str(getattr(finding, "risk", "")).upper()
-    if "QUANTUM" in raw_risk or any(q in fid.upper() for q in ["RSA-KEX", "ECDH-KEX", "QUANTUM"]):
+    if "QUANTUM" in raw_risk or any(q in str(fid).upper() for q in ["RSA-KEX", "ECDH-KEX", "QUANTUM"]):
         risk = "QUANTUM"
-    else:
+    elif raw_risk in ("CLASSICAL_SECURITY", "IMPLEMENTATION_SECURITY", "CLASSICAL"):
         risk = "CLASSICAL"
+    else:
+        threat = getattr(finding, "quantum_threat_vector", None)
+        risk = classify_risk_domain(
+            algorithm=val,
+            threat_vector=str(threat) if threat else None,
+            title=title,
+            category=role,
+            default="CLASSICAL",
+        )
 
     msg = getattr(finding, "description", getattr(finding, "message", title))
     rec = getattr(finding, "recommendation", "Follow cryptographic implementation best practices.")
@@ -129,15 +140,15 @@ def normalize_config_finding(finding: Any, system_id: Optional[str] = None) -> N
     ev = ev_raw.value if hasattr(ev_raw, "value") else str(ev_raw)
     sev = str(getattr(finding, "severity", "MEDIUM")).upper()
 
-    val_u = val.upper()
-    title_u = title.upper()
-    fid_u = str(fid).upper()
-    if any(q in val_u or q in title_u or q in fid_u for q in ["RSA", "ECDH", "ECDSA", "DIFFIE", "X25519", "QUANTUM", "PQC"]):
-        risk = "QUANTUM"
-    elif any(c in val_u or c in title_u or c in fid_u for c in ["3DES", "DES", "MD5", "SHA-1", "RC4", "TLS1.0", "TLS1.1", "ECB", "NO_SALT"]):
-        risk = "CLASSICAL"
-    else:
-        risk = "QUANTUM" if any(k in val_u for k in ["RSA", "DH"]) else "CLASSICAL"
+    threat = getattr(finding, "quantum_threat", getattr(finding, "quantum_threat_vector", None))
+    cat = getattr(finding, "category", None) or str(fid)
+    risk = classify_risk_domain(
+        algorithm=val,
+        threat_vector=str(threat) if threat else None,
+        title=title,
+        category=str(cat),
+        default="CLASSICAL",
+    )
 
     msg = getattr(finding, "description", getattr(finding, "message", f"{title}: {val}"))
     rec = getattr(finding, "recommendation", "Review and align configuration with banking standards.")
@@ -182,23 +193,25 @@ def normalize_profile_evidence_item(item: EvidenceItem, system_id: Optional[str]
     ev_status = "DECLARED" if src == "OPERATOR_DECLARED" else ("OBSERVED" if src == "CONFIGURATION_FILE" else obs)
 
     # Determine risk dimension
-    if any(q in val_upper for q in ["RSA", "ECDH", "ECDSA", "DIFFIE", "X25519"]):
-        risk = "QUANTUM"
-        sev = "HIGH" if "RSA-2048" in val_upper or "ECDH" in val_upper else "MEDIUM"
-        msg = f"{item.control} operates with classical asymmetric algorithm ({item.value}) vulnerable to Shor's algorithm."
-        rec = "Transition to NIST Post-Quantum Cryptographic Standards (ML-KEM / ML-DSA)."
+    risk = classify_risk_domain(algorithm=item.value, title=item.control, default="CLASSICAL")
+    if risk == "QUANTUM":
+        if any(pqc in val_upper for pqc in ["ML-KEM", "ML-DSA", "X25519MLKEM", "AES-256", "CHACHA20", "SHA-384", "SHA-512"]):
+            sev = "INFORMATIONAL"
+            msg = f"{item.control} verified using quantum-resilient primitive ({item.value})."
+            rec = "Maintain periodic audit and certificate lifecycle."
+        elif any(g in val_upper for g in ["AES-128", "AES128"]):
+            sev = "HIGH"
+            msg = f"{item.control} operates with 128-bit symmetric key ({item.value}) vulnerable to Grover's algorithm quadratic search."
+            rec = "Upgrade symmetric encryption keys to AES-256-GCM."
+        else:
+            sev = "HIGH" if ("RSA-2048" in val_upper or "ECDH" in val_upper) else "MEDIUM"
+            msg = f"{item.control} operates with classical asymmetric algorithm ({item.value}) vulnerable to Shor's algorithm."
+            rec = "Transition to NIST Post-Quantum Cryptographic Standards (ML-KEM / ML-DSA)."
     elif any(c in val_upper for c in ["3DES", "DES", "MD5", "SHA-1", "TLSV1.0", "TLSV1.1"]):
-        risk = "CLASSICAL"
         sev = "CRITICAL" if "3DES" in val_upper else "HIGH"
         msg = f"{item.control} configured with deprecated classical cryptographic primitive ({item.value})."
         rec = "Replace deprecated primitive with AES-256-GCM and SHA-256/384."
-    elif any(pqc in val_upper for pqc in ["ML-KEM", "ML-DSA", "X25519MLKEM", "AES-256"]):
-        risk = "QUANTUM"
-        sev = "INFORMATIONAL"
-        msg = f"{item.control} verified using quantum-resilient primitive ({item.value})."
-        rec = "Maintain periodic audit and certificate lifecycle."
     else:
-        risk = "CLASSICAL"
         sev = "LOW"
         msg = item.description or f"{item.control}: {item.value}"
         rec = "Maintain standard operational monitoring."

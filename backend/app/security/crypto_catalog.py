@@ -222,5 +222,258 @@ ALGORITHM_CATALOG: Dict[str, Dict[str, Any]] = {
         ),
         "target_standard": PQC_STANDARDS["SHA_384"]["standard"],
     },
+    "3DES": {
+        "family": "3DES",
+        "category": "symmetric_cipher",
+        "threat_vector": QuantumThreatVector.CLASSICAL_BROKEN.value,
+        "shor_vulnerable": False,
+        "grover_vulnerable": True,
+        "vulnerability_explanation": (
+            "Triple-DES (3DES) is deprecated by NIST (SP 800-131A Rev 2) and disallowed after 2023 "
+            "due to Sweet32 64-bit block collision attacks and inadequate key strength."
+        ),
+        "target_standard": PQC_STANDARDS["AES_256"]["standard"],
+    },
+    "DES": {
+        "family": "DES",
+        "category": "symmetric_cipher",
+        "threat_vector": QuantumThreatVector.CLASSICAL_BROKEN.value,
+        "shor_vulnerable": False,
+        "grover_vulnerable": True,
+        "vulnerability_explanation": (
+            "Single DES uses a 56-bit key trivially breakable by classical exhaustive search."
+        ),
+        "target_standard": PQC_STANDARDS["AES_256"]["standard"],
+    },
+    "RC4": {
+        "family": "RC4",
+        "category": "symmetric_cipher",
+        "threat_vector": QuantumThreatVector.CLASSICAL_BROKEN.value,
+        "shor_vulnerable": False,
+        "grover_vulnerable": True,
+        "vulnerability_explanation": (
+            "RC4 stream cipher suffers from severe statistical biases (RFC 7465 prohibits its use in TLS)."
+        ),
+        "target_standard": PQC_STANDARDS["AES_256"]["standard"],
+    },
+    "ML-KEM": {
+        "family": "ML-KEM",
+        "category": "key_exchange",
+        "threat_vector": QuantumThreatVector.POST_QUANTUM.value,
+        "shor_vulnerable": False,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "NIST FIPS 203 standardized post-quantum module-lattice key encapsulation mechanism."
+        ),
+        "target_standard": PQC_STANDARDS["ML_KEM"]["standard"],
+    },
+    "ML-DSA": {
+        "family": "ML-DSA",
+        "category": "public_key",
+        "threat_vector": QuantumThreatVector.POST_QUANTUM.value,
+        "shor_vulnerable": False,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "NIST FIPS 204 standardized post-quantum module-lattice digital signature standard."
+        ),
+        "target_standard": PQC_STANDARDS["ML_DSA"]["standard"],
+    },
+    "SLH-DSA": {
+        "family": "SLH-DSA",
+        "category": "public_key",
+        "threat_vector": QuantumThreatVector.POST_QUANTUM.value,
+        "shor_vulnerable": False,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "NIST FIPS 205 standardized stateless hash-based digital signature standard."
+        ),
+        "target_standard": PQC_STANDARDS["SLH_DSA"]["standard"],
+    },
 }
+
+
+def get_algorithm_profile(algo_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Retrieves the cryptographic profile and quantum threat assessment for a primitive.
+    Matches exact catalog keys or canonical algorithm identifiers.
+    """
+    if not algo_name or not isinstance(algo_name, str):
+        return None
+    clean = algo_name.strip().upper()
+    if not clean:
+        return None
+
+    # 1. Exact catalog key match (case-insensitive)
+    for key, profile in ALGORITHM_CATALOG.items():
+        if clean == key.upper():
+            return profile
+
+    # 2. Canonical substring pattern matches
+    # Classically broken primitives
+    if any(k in clean for k in ["3DES", "TRIPLE-DES", "DES-EDE"]):
+        return ALGORITHM_CATALOG.get("3DES")
+    if "RC4" in clean:
+        return ALGORITHM_CATALOG.get("RC4")
+    if "MD5" in clean:
+        return ALGORITHM_CATALOG.get("MD5")
+    if "SHA-1" in clean or "SHA1" in clean:
+        return ALGORITHM_CATALOG.get("SHA-1")
+    if "DES" in clean and not any(k in clean for k in ["ED25519", "ED448", "EDDSA", "ECDSA", "ML-DSA", "SLH-DSA"]):
+        return ALGORITHM_CATALOG.get("DES")
+
+    # Post-quantum primitives
+    if any(k in clean for k in ["ML-KEM", "KYBER"]):
+        return ALGORITHM_CATALOG.get("ML-KEM")
+    if any(k in clean for k in ["ML-DSA", "DILITHIUM"]):
+        return ALGORITHM_CATALOG.get("ML-DSA")
+    if any(k in clean for k in ["SLH-DSA", "SPHINCS"]):
+        return ALGORITHM_CATALOG.get("SLH-DSA")
+
+    # Quantum-resistant symmetric ciphers & hashes
+    if any(k in clean for k in ["AES-256", "AES256"]):
+        return ALGORITHM_CATALOG.get("AES-256")
+    if any(k in clean for k in ["CHACHA20", "CHACHA"]):
+        return ALGORITHM_CATALOG.get("ChaCha20")
+    if any(k in clean for k in ["SHA-512", "SHA512"]):
+        return ALGORITHM_CATALOG.get("SHA-512")
+    if any(k in clean for k in ["SHA-384", "SHA384"]):
+        return ALGORITHM_CATALOG.get("SHA-384")
+    if any(k in clean for k in ["SHA-256", "SHA256"]):
+        return ALGORITHM_CATALOG.get("SHA-256")
+
+    # Grover-vulnerable symmetric ciphers
+    if any(k in clean for k in ["AES-128", "AES128", "AES-192", "AES192"]):
+        return ALGORITHM_CATALOG.get("AES-128")
+
+    # Shor-vulnerable asymmetric public-key and key-exchange algorithms
+    if "RSA" in clean:
+        return ALGORITHM_CATALOG.get("RSA")
+    if "ECDHE" in clean or "X25519" in clean:
+        return ALGORITHM_CATALOG.get("ECDHE")
+    if any(k in clean for k in ["ECDSA", "ECC", "SECP", "PRIME256"]):
+        return ALGORITHM_CATALOG.get("ECC")
+    if any(k in clean for k in ["ED25519", "ED448", "EDDSA"]):
+        return ALGORITHM_CATALOG.get("EdDSA")
+    if any(k in clean for k in ["DIFFIE", "DHE"]) or ("DH" in clean and "ECDH" not in clean):
+        return ALGORITHM_CATALOG.get("Diffie-Hellman")
+
+    return None
+
+
+def classify_risk_domain(
+    algorithm: Optional[str] = None,
+    threat_vector: Optional[str] = None,
+    title: Optional[str] = None,
+    category: Optional[str] = None,
+    default: str = "CLASSICAL",
+) -> str:
+    """Deterministically classifies finding risk domain into 'QUANTUM' or 'CLASSICAL'.
+
+    Evaluation order:
+    1. Explicit threat vector mapping (e.g. SHOR, GROVER, SNDL, RESISTANT, POST_QUANTUM -> QUANTUM;
+       CLASSICAL_BROKEN -> CLASSICAL).
+    2. Central knowledge base lookup via get_algorithm_profile(algorithm).
+    3. Structural text pattern matching across title, category, and algorithm.
+    4. Safe fallback to default.
+    """
+    # 1. Threat vector mapping
+    if threat_vector:
+        tv = str(threat_vector).upper()
+        # Must check CLASSICAL_BROKEN before checking for "QUANTUM" because
+        # CLASSICAL_BROKEN's description is "Classically Broken & Quantum Insecure".
+        if (
+            "CLASSICAL_BROKEN" in tv
+            or "CLASSICALLY BROKEN" in tv
+            or tv == QuantumThreatVector.CLASSICAL_BROKEN.value.upper()
+        ):
+            return "CLASSICAL"
+        if any(
+            q in tv
+            for q in [
+                "SHOR",
+                "GROVER",
+                "SNDL",
+                "RESISTANT",
+                "POST_QUANTUM",
+                "POST-QUANTUM",
+                "QUANTUM",
+            ]
+        ):
+            return "QUANTUM"
+
+    # 2. Central knowledge base lookup
+    if algorithm:
+        profile = get_algorithm_profile(algorithm)
+        if profile and "threat_vector" in profile:
+            vec = profile["threat_vector"]
+            if vec == QuantumThreatVector.CLASSICAL_BROKEN.value:
+                return "CLASSICAL"
+            if vec in (
+                QuantumThreatVector.SHOR.value,
+                QuantumThreatVector.GROVER.value,
+                QuantumThreatVector.SNDL.value,
+                QuantumThreatVector.RESISTANT.value,
+                QuantumThreatVector.POST_QUANTUM.value,
+            ):
+                return "QUANTUM"
+
+    # 3. Contextual text pattern matching
+    combined = f"{algorithm or ''} {title or ''} {category or ''}".upper()
+
+    # Broken classical cryptography / implementation flaws
+    if any(
+        c in combined
+        for c in [
+            "3DES",
+            "DES",
+            "MD5",
+            "SHA-1",
+            "SHA1",
+            "RC4",
+            "RC2",
+            "BLOWFISH",
+            "ECB",
+            "NO_SALT",
+            "STATIC_IV",
+            "WEAK_RANDOM",
+            "TLS 1.0",
+            "TLS 1.1",
+            "TLS1.0",
+            "TLS1.1",
+            "EXPIRED",
+            "CLASSICAL_BROKEN",
+            "CLASSICAL_SECURITY",
+        ]
+    ):
+        return "CLASSICAL"
+
+    # Quantum threat / PQC indicators
+    if any(
+        q in combined
+        for q in [
+            "SHOR",
+            "GROVER",
+            "SNDL",
+            "PQC",
+            "QUANTUM",
+            "ML-KEM",
+            "ML-DSA",
+            "SLH-DSA",
+            "KYBER",
+            "DILITHIUM",
+            "SPHINCS",
+            "RSA",
+            "ECDH",
+            "ECDSA",
+            "DIFFIE",
+            "X25519",
+            "AES-128",
+            "AES128",
+            "AES-256",
+            "AES256",
+            "CHACHA20",
+        ]
+    ):
+        return "QUANTUM"
+
+    return default
 
