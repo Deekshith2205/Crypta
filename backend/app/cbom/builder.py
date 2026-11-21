@@ -62,14 +62,14 @@ ALGO_SECURITY_LEVELS = {
     "RSA-3072": {"primitive": "pke", "classical": 128, "quantum": 0, "functions": ["encrypt", "decrypt", "sign", "verify"]},
     "RSA-4096": {"primitive": "pke", "classical": 192, "quantum": 0, "functions": ["encrypt", "decrypt", "sign", "verify"]},
     "ECDSA": {"primitive": "signature", "classical": 128, "quantum": 0, "functions": ["sign", "verify"]},
-    "ECDHE": {"primitive": "key-agree", "classical": 128, "quantum": 0, "functions": ["key-agree"]},
-    "X25519": {"primitive": "key-agree", "classical": 128, "quantum": 0, "functions": ["key-agree"]},
+    "ECDHE": {"primitive": "key-agree", "classical": 128, "quantum": 0, "functions": ["keyderive"]},
+    "X25519": {"primitive": "key-agree", "classical": 128, "quantum": 0, "functions": ["keyderive"]},
     # Post-Quantum (NIST FIPS 203 / 204)
     "ML-KEM-512": {"primitive": "kem", "classical": 128, "quantum": 1, "functions": ["encapsulate", "decapsulate"]},
     "ML-KEM-768": {"primitive": "kem", "classical": 192, "quantum": 3, "functions": ["encapsulate", "decapsulate"]},
     "ML-KEM-1024": {"primitive": "kem", "classical": 256, "quantum": 5, "functions": ["encapsulate", "decapsulate"]},
     "ML-KEM": {"primitive": "kem", "classical": 192, "quantum": 3, "functions": ["encapsulate", "decapsulate"]},
-    "X25519MLKEM768": {"primitive": "kem", "classical": 192, "quantum": 3, "functions": ["encapsulate", "decapsulate", "key-agree"]},
+    "X25519MLKEM768": {"primitive": "kem", "classical": 192, "quantum": 3, "functions": ["encapsulate", "decapsulate", "keyderive"]},
     "ML-DSA-44": {"primitive": "signature", "classical": 128, "quantum": 2, "functions": ["sign", "verify"]},
     "ML-DSA-65": {"primitive": "signature", "classical": 192, "quantum": 3, "functions": ["sign", "verify"]},
     "ML-DSA-87": {"primitive": "signature", "classical": 256, "quantum": 5, "functions": ["sign", "verify"]},
@@ -273,16 +273,20 @@ class CBOMBuilder:
                 str(spec.get("classical")) if spec.get("classical") else None
             )
 
+            valid_modes = {"cbc", "ecb", "ccm", "gcm", "cfb", "ofb", "ctr", "other", "unknown"}
+            raw_mode = asset.mode.lower() if asset.mode else None
+            safe_mode = (raw_mode if raw_mode in valid_modes else "other") if raw_mode else None
+
             algo_props = AlgorithmProperties(
                 primitive=primitive,
                 parameterSetIdentifier=param_id,
                 curve=asset.curve,
-                mode=asset.mode.lower() if asset.mode else None,
+                mode=safe_mode,
                 padding=asset.padding.lower() if asset.padding else None,
                 cryptoFunctions=functions,
                 classicalSecurityLevel=classical,
                 nistQuantumSecurityLevel=quantum,
-                executionEnvironment="hardware-hsm" if "hsm" in str(asset.metadata).lower() else "software-plain-ram"
+                executionEnvironment="hardware" if "hsm" in str(asset.metadata).lower() else "software-plain-ram"
             )
 
             return CryptoProperties(

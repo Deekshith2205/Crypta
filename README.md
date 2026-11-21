@@ -283,7 +283,7 @@ pytest backend/tests
 cd frontend && npm test
 ```
 
-Includes **715 passing backend unit, integration, and security tests** and **71 passing frontend tests** covering:
+Includes **731 passing backend unit, integration, and security tests** and **71 passing frontend tests** covering:
 - What-If Post-Quantum Migration Simulator (`app.services.migration_simulator`, `app.models.simulation`)
 - Zero-mutation deep-copy semantics and profile immutability
 - Strict migration target algorithm allow-list and validation rejection (422)

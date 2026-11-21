@@ -8,6 +8,14 @@ Validates:
 
 import json
 import pytest
+
+try:
+    from cyclonedx.schema import SchemaVersion, OutputFormat
+    from cyclonedx.validation import make_schemabased_validator
+    CYCLONEDX_LIB_AVAILABLE = True
+except ImportError:
+    CYCLONEDX_LIB_AVAILABLE = False
+
 from app.cbom.builder import CBOMBuilder
 from app.cbom.models import (
     CBOMComponent,
@@ -296,3 +304,24 @@ class TestCBOMPhaseFValidation:
         report = validator.validate(doc)
         assert report.is_valid is True
         assert report.component_count == 0
+
+    def test_official_cyclonedx_1_7_schema_validation(self):
+        """Validates that generated banking CBOMs conform strictly to the official CycloneDX 1.7 JSON Schema."""
+        if not CYCLONEDX_LIB_AVAILABLE:
+            pytest.skip("cyclonedx-python-lib not installed")
+
+        from app.services.report_service import generate_system_cbom
+
+        validator = make_schemabased_validator(OutputFormat.JSON, SchemaVersion.V1_7)
+        systems = [
+            "BANK-PROF-PAYMENT-GATEWAY",
+            "BANK-PROF-CORE-BANKING",
+            "BANK-PROF-KYC-DB",
+            "BANK-PROF-NET-BANKING",
+            "BANK-PROF-ATM-NETWORK",
+        ]
+        for sys_id in systems:
+            cbom_dict = generate_system_cbom(sys_id)
+            json_str = json.dumps(cbom_dict)
+            validation_err = validator.validate_str(json_str)
+            assert validation_err is None, f"CycloneDX 1.7 schema validation error for {sys_id}: {validation_err}"
