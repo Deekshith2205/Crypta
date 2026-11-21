@@ -3,6 +3,8 @@ Main FastAPI application entry point.
 """
 
 import logging
+import os
+from typing import List, Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router as api_router
@@ -15,6 +17,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger("quantumshield")
 
+DEFAULT_ALLOWED_ORIGINS: List[str] = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+
+def get_cors_origins(env_origins: Optional[str] = None) -> List[str]:
+    """Retrieves allowed CORS origins from environment or defaults to safe local origins."""
+    raw = env_origins if env_origins is not None else os.environ.get(
+        "QS_ALLOWED_ORIGINS", os.environ.get("CORS_ALLOWED_ORIGINS", "")
+    )
+    if not raw:
+        return list(DEFAULT_ALLOWED_ORIGINS)
+    parsed = [orig.strip() for orig in raw.split(",") if orig.strip()]
+    return parsed if parsed else list(DEFAULT_ALLOWED_ORIGINS)
+
+
 app = FastAPI(
     title="QuantumShield API",
     description="Banking Security Audit & Zero-Trust Readiness Platform with Quantum-Safe Cryptographic Assessment",
@@ -23,12 +44,16 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Configure CORS for local development and production deployments
+# Configure hardened CORS: explicit origins and no wildcard credentials
+_cors_origins = get_cors_origins()
+_has_wildcard = "*" in _cors_origins
+_allow_credentials = not _has_wildcard
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins for local hackathon development
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=_cors_origins,
+    allow_credentials=_allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["*"],
 )
 
