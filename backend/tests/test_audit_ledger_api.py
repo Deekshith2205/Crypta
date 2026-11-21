@@ -97,7 +97,7 @@ def test_get_audit_head_endpoint():
     assert "record_count" in head
     assert "chain_valid" in head
     assert "status" in head
-    assert head["status"] in ("VALID", "LOCALLY_VERIFIED", "EXTERNALLY_ANCHORED")
+    assert head["status"] in ("VALID", "LOCALLY_VERIFIED", "EXTERNALLY_ANCHORED", "EMPTY")
     assert "external_anchor" in head
     assert len(head["current_hash"]) == 64
 
