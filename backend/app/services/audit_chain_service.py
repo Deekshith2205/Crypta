@@ -82,17 +82,42 @@ def compute_payload_hash(data: Any) -> str:
     return compute_sha256(canonical)
 
 
+from app.security.audit_storage import AuditLedgerStorage, DEFAULT_AUDIT_STORAGE, GENESIS_HASH
+from app.security.audit_key import AuditKeyManager, DEFAULT_AUDIT_KEY_MANAGER
+
+
 class AuditChainService:
     """Manages creation, storage, and cryptographic verification of tamper-evident audit records."""
 
-    def __init__(self):
-        self._ledger: List[AuditRecord] = []
+    def __init__(
+        self,
+        storage: Optional[AuditLedgerStorage] = None,
+        key_manager: Optional[AuditKeyManager] = None,
+    ):
+        self._storage = storage
+        self._key_manager = key_manager if key_manager is not None else DEFAULT_AUDIT_KEY_MANAGER
+        self._in_memory_fallback: List[AuditRecord] = []
 
     def get_latest_hash(self) -> str:
         """Returns the current_hash of the latest record or GENESIS_PREVIOUS_HASH."""
-        if not self._ledger:
+        if self._storage is not None:
+            return self._storage.get_latest_hash()
+        if not self._in_memory_fallback:
             return GENESIS_PREVIOUS_HASH
-        return self._ledger[-1].current_hash
+        return self._in_memory_fallback[-1].current_hash
+
+    def get_latest_record_for_system(self, system_id: str) -> Optional[AuditRecord]:
+        """Returns the latest audit record for a given system if available."""
+        if self._storage is not None:
+            count = self._storage.get_record_count(assessment_id=system_id)
+            if count > 0:
+                records = self._storage.get_records(limit=1, offset=count - 1, assessment_id=system_id)
+                if records:
+                    return records[0]
+        for rec in reversed(self._in_memory_fallback):
+            if rec.assessment_id == system_id:
+                return rec
+        return None
 
     def create_audit_record(
         self,
@@ -104,28 +129,45 @@ class AuditChainService:
         """
         Creates a new tamper-evident audit record:
         1. canonical_json = canonicalize_json(assessment_data)
-        2. assessment_hash = SHA256(canonical_json)
+        2. assessment_hash = SHA256(canonical_json without volatile fields)
         3. current_hash = SHA256(canonical_json + previous_hash)
+        4. signature = HMAC-SHA256(rec_id + assessment_id + a_hash + prev + c_hash + timestamp)
+        Includes idempotency: if stored record for assessment_id already has matching assessment_hash, returns existing record.
         """
-        canonical = canonicalize_json(assessment_data)
+        canonical = canonicalize_json(assessment_data, strip_volatile=True)
         a_hash = compute_sha256(canonical)
+
+        # Idempotency check: prevent duplicate records on retry of identical assessment
+        if store:
+            latest_existing = self.get_latest_record_for_system(assessment_id)
+            if latest_existing is not None and latest_existing.assessment_hash == a_hash:
+                return latest_existing
 
         prev = previous_hash if previous_hash is not None else self.get_latest_hash()
         c_hash = compute_sha256(canonical + prev)
+        ts = datetime.now(timezone.utc).isoformat()
+        rec_id = str(uuid.uuid4())
+
+        sig_material = f"{rec_id}:{assessment_id}:{a_hash}:{prev}:{c_hash}:{ts}".encode("utf-8")
+        sig = self._key_manager.sign(sig_material)
 
         record = AuditRecord(
-            record_id=str(uuid.uuid4()),
+            record_id=rec_id,
             assessment_id=assessment_id,
             assessment_hash=a_hash,
             previous_hash=prev,
             current_hash=c_hash,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            signature=sig,
+            timestamp=ts,
             schema_version="1.0.0",
             canonical_payload=canonical,
         )
 
         if store:
-            self._ledger.append(record)
+            if self._storage is not None:
+                self._storage.append_record(record)
+            else:
+                self._in_memory_fallback.append(record)
 
         return record
 
@@ -143,8 +185,12 @@ class AuditChainService:
         try:
             # Step 1: Verify canonical payload against assessment_data if provided
             if assessment_data is not None:
-                recalculated_canonical = canonicalize_json(assessment_data)
+                recalculated_canonical = canonicalize_json(assessment_data, strip_volatile=True)
                 recalculated_a_hash = compute_sha256(recalculated_canonical)
+                if recalculated_a_hash != record.assessment_hash:
+                    alt_raw = compute_sha256(canonicalize_json(assessment_data, strip_volatile=False))
+                    if alt_raw == record.assessment_hash:
+                        recalculated_a_hash = alt_raw
                 if recalculated_a_hash != record.assessment_hash:
                     return AuditVerificationResult(
                         valid=False,
@@ -154,6 +200,14 @@ class AuditChainService:
                     )
             elif record.canonical_payload:
                 recalculated_a_hash = compute_sha256(record.canonical_payload)
+                if recalculated_a_hash != record.assessment_hash:
+                    try:
+                        parsed = json.loads(record.canonical_payload)
+                        alt_hash = compute_payload_hash(parsed)
+                        if alt_hash == record.assessment_hash:
+                            recalculated_a_hash = alt_hash
+                    except Exception:
+                        pass
                 if recalculated_a_hash != record.assessment_hash:
                     return AuditVerificationResult(
                         valid=False,
@@ -231,9 +285,11 @@ class AuditChainService:
         )
 
     def get_ledger(self) -> List[AuditRecord]:
-        """Returns the in-memory audit ledger."""
-        return list(self._ledger)
+        """Returns the audit ledger records."""
+        if self._storage is not None:
+            return self._storage.get_records(limit=100000, offset=0)
+        return list(self._in_memory_fallback)
 
 
-# Default singleton instance
-DEFAULT_AUDIT_CHAIN_SERVICE = AuditChainService()
+# Default singleton instance bound to persistent storage
+DEFAULT_AUDIT_CHAIN_SERVICE = AuditChainService(storage=DEFAULT_AUDIT_STORAGE)

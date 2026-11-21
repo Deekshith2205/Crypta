@@ -56,7 +56,11 @@ def generate_system_cbom(system_id: str) -> Dict[str, Any]:
     }
 
 
-def build_complete_json_report(system_id: str) -> CompleteAssessmentReport:
+def build_complete_json_report(
+    system_id: str,
+    seal_audit: bool = False,
+    audit_service: Optional[Any] = None,
+) -> CompleteAssessmentReport:
     """
     Assembles a complete, machine-readable assessment report for a banking system,
     sealed with a cryptographic audit hash chain record.
@@ -277,11 +281,23 @@ def build_complete_json_report(system_id: str) -> CompleteAssessmentReport:
     }
 
     # 17. Cryptographic sealing via AuditChainService
-    audit_record = DEFAULT_AUDIT_CHAIN_SERVICE.create_audit_record(
-        assessment_data=payload_for_seal,
-        assessment_id=report_id,
-        store=True,
-    )
+    svc = audit_service or DEFAULT_AUDIT_CHAIN_SERVICE
+    if seal_audit:
+        audit_record = svc.create_audit_record(
+            assessment_data=payload_for_seal,
+            assessment_id=system_id,
+            store=True,
+        )
+    else:
+        existing = svc.get_latest_record_for_system(system_id) if hasattr(svc, "get_latest_record_for_system") else None
+        if existing is not None:
+            audit_record = existing
+        else:
+            audit_record = svc.create_audit_record(
+                assessment_data=payload_for_seal,
+                assessment_id=system_id,
+                store=False,
+            )
 
     return CompleteAssessmentReport(
         metadata=rep_meta,
