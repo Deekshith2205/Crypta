@@ -697,3 +697,50 @@ Phase D delivers enterprise-grade post-quantum cryptography management and banki
 - **Interactive Visualizations**: Renders 4-tier Key Protection Chain hierarchies, cryptographic agility badges, and Zero Trust compliance cards.
 - **What-If Sandbox UI**: Interactive playground allowing CISOs to model cryptographic upgrades and visualize immediate priority score reductions.
 - **Full Quality Assurance**: Validated with zero TypeScript errors, zero lint warnings (`oxlint`), passing Vitest component suites, and production-optimized asset builds.
+
+---
+
+## 15. AI Readiness Intelligence & Reliability Engine (Phase D — AI Trust)
+
+QuantumShield incorporates a secure, resilient, and cryptographically verified AI reasoning layer providing contextual explanations of cryptographic findings, banking risk scoring rationales, migration advisories, and executive report summaries.
+
+### 15.1 Architectural Invariants & Deterministic Authority
+- **Code is Sole Authority**: The deterministic scanning and risk engine is the single source of truth. AI models are strictly advisory and never generate findings, assign severities, alter priority scores (0–100), reorder upgrade queues (P0–P3), or override compliance determinations.
+- **AES-256 Grover Resilience Invariant**: Rejects any assertions that AES-256 is quantum-broken or compromised by Shor's algorithm. Under Grover's algorithm, AES-256 retains 128-bit quantum security.
+- **Observability Honesty (`NOT_OBSERVABLE != VULNERABLE`)**: Explanations must not claim that unobservable internal controls indicate confirmed security flaws or compromises.
+
+### 15.2 Input Sanitization & Multi-Layer Adversarial Defenses (Task D1)
+- **Unicode NFKC Normalization**: Normalizes homoglyphs, fullwidth characters, and composite characters prior to inspection.
+- **Delimiter Breakout Protection**: Strictly isolates untrusted telemetry within `<untrusted_evidence>` boundaries; neutralizes delimiter breakout attempts (`</untrusted_evidence>`, markdown system role blocks) to `[ESCAPED_DELIMITER]`.
+- **Multilingual Injection Defense**: Neutralizes prompt injection commands across English, French, Spanish, German, Chinese, and Russian to `[FILTERED_INPUT]`.
+- **Sensitive Data & Secret Redaction**: Redacts API keys (OpenAI, Google, AWS, GitHub, Slack), PEM private keys, bearer JWT tokens, and high-entropy secrets ($H > 4.3$) while strictly preserving legitimate cryptographic digests (SHA-256, SHA-1, MD5, hex fingerprints).
+
+### 15.3 Deterministic Output Validation (Task D2)
+- **Invariant Verification Gate**: Validates all AI outputs against deterministic truth via `validate_ai_explanation`:
+  - Rejects claims asserting unobservable evidence is vulnerable.
+  - Rejects assertions that AES-256 is broken by Shor's algorithm.
+  - Rejects hallucinated NIST FIPS standards (only valid standards like FIPS 203, 204, 205 are accepted).
+  - Rejects severity and score override attempts.
+  - Rejects speculative financial dollar cost estimates.
+
+### 15.4 Deterministic Explanation Fallback (Task D3)
+- **Offline High Availability**: `DeterministicExplanationService` provides expert rule-based explanations across all finding types, risk postures, migration paths, and report summaries.
+- **Automatic Fail-Safe Engagement**: Engages automatically when external providers are unconfigured, time out, are rate-limited, return malformed JSON, or fail trust validation.
+
+### 15.5 Rate Limiting & Daily Cost Protection (Task D4)
+- **Sliding-Window Limiter**: Enforces global rate limiting (5 req/min, burst 10) on AI-enabled endpoints.
+- **Thread-Safe Daily Budget Tracker**: `AIBudgetTracker` manages daily token and dollar caps with automatic UTC midnight rollover, preventing denial-of-wallet cost runaway.
+- **Telemetry Endpoint**: `GET /ai/budget` provides live monitoring of token and cost consumption.
+
+### 15.6 Cryptographic Evidence Provenance (Task D5)
+- **RFC 8785 Canonical Serialization**: Formats input telemetry deterministically regardless of key order.
+- **SHA-256 Evidence Hashing**: Binds a unique `evidence_hash` to every generated explanation.
+- **Cryptographic Verification**: `verify_explanation_provenance` enables independent verification of tamper-free provenance between evidence and explanation.
+
+### 15.7 Provider Resilience & Schema Repair (Task D6)
+- **HTTP Resilience Module**: Exponential backoff and retry on transient errors (HTTP 502, 503, 504, 429 with `Retry-After <= 5.0s`, and network disconnects); fast fail on 4xx client errors.
+- **Schema Repair Pipeline**: Strips markdown fences, removes conversational preamble/postamble, normalizes smart quotes, and removes trailing commas before schema validation.
+
+### 15.8 Adversarial Test Suite (Task D7)
+- 23 comprehensive adversarial tests verifying prompt injection defeat, delimiter isolation, secret redaction, invariant enforcement, budget exhaustion blocking, fallback engagement, and tamper detection.
+
