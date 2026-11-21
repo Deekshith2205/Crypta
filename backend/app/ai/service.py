@@ -31,6 +31,7 @@ from app.ai.providers.base import (
 from app.ai.providers.factory import get_ai_provider
 from app.ai.sanitization import sanitize_dict_fields, sanitize_text
 from app.ai.validation import validate_ai_explanation
+from app.ai.fallback import DeterministicExplanationService
 from app.ai.schemas import (
     AIStatusResponse,
     AIExplanationResult,
@@ -105,13 +106,28 @@ class QuantumReadinessAIService:
         self,
         provider: Optional[BaseAIProvider] = None,
         settings: Optional[AISettings] = None,
+        enable_fallback: bool = False,
     ):
         self._settings = settings or DEFAULT_AI_SETTINGS
         self._provider = provider or get_ai_provider(self._settings)
+        self._enable_fallback = enable_fallback
+        self._fallback_service = DeterministicExplanationService()
 
     @property
     def provider(self) -> BaseAIProvider:
         return self._provider
+
+    @property
+    def enable_fallback(self) -> bool:
+        return self._enable_fallback
+
+    @enable_fallback.setter
+    def enable_fallback(self, value: bool) -> None:
+        self._enable_fallback = bool(value)
+
+    @property
+    def fallback_service(self) -> DeterministicExplanationService:
+        return self._fallback_service
 
     def _get_input_size_error(
         self,
@@ -327,6 +343,7 @@ class QuantumReadinessAIService:
     async def explain_finding(
         self,
         request: FindingExplanationRequest,
+        fallback: Optional[bool] = None,
     ) -> AIExplanationResult[FindingExplanationResponse]:
         """Generates an AI-powered contextual explanation for a scanner finding (Task 10.2)."""
 
@@ -374,6 +391,11 @@ Produce a JSON object matching this schema:
             input_data=sanitized_req,
         )
 
+        should_fallback = fallback if fallback is not None else self._enable_fallback
+        if not result.success and should_fallback:
+            logger.info("Engaging deterministic fallback for finding %s: %s", request.rule_id, result.error)
+            return self._fallback_service.explain_finding(request)
+
         # Preserve the deterministic scanner's rule identifier.
         if result.success and result.data:
             result.data.rule_id = request.rule_id
@@ -383,6 +405,7 @@ Produce a JSON object matching this schema:
     async def explain_banking_risk(
         self,
         request: BankingRiskExplanationRequest,
+        fallback: Optional[bool] = None,
     ) -> AIExplanationResult[BankingRiskExplanationResponse]:
         """Explains deterministic banking risk scoring and queue ranking (Task 10.3)."""
 
@@ -431,6 +454,11 @@ Produce a JSON object matching this schema:
             input_data=sanitized_req,
         )
 
+        should_fallback = fallback if fallback is not None else self._enable_fallback
+        if not result.success and should_fallback:
+            logger.info("Engaging deterministic fallback for banking risk %s: %s", request.system_id, result.error)
+            return self._fallback_service.explain_banking_risk(request)
+
         # Preserve the deterministic system identity.
         if result.success and result.data:
             result.data.system_id = request.system_id
@@ -441,6 +469,7 @@ Produce a JSON object matching this schema:
     async def advise_migration(
         self,
         request: MigrationAdvisoryRequest,
+        fallback: Optional[bool] = None,
     ) -> AIExplanationResult[MigrationAdvisoryResponse]:
         """Provides AI-powered migration advisory based on simulator/upgrade plan (Task 10.4)."""
 
@@ -487,6 +516,11 @@ Produce a JSON object matching this schema:
             input_data=sanitized_req,
         )
 
+        should_fallback = fallback if fallback is not None else self._enable_fallback
+        if not result.success and should_fallback:
+            logger.info("Engaging deterministic fallback for migration advisory %s: %s", request.system_id, result.error)
+            return self._fallback_service.advise_migration(request)
+
         # Preserve the deterministic system identity.
         if result.success and result.data:
             result.data.system_id = request.system_id
@@ -499,6 +533,7 @@ Produce a JSON object matching this schema:
         self,
         request: ReportExplanationRequest,
         report_context: Optional[Dict[str, Any]] = None,
+        fallback: Optional[bool] = None,
     ) -> AIExplanationResult[ReportExplanationResponse]:
         """Generates AI summaries from a compact, allowlisted report context."""
 
@@ -732,6 +767,11 @@ Produce a JSON object matching this schema:
             error_context=f"report explanation {request.system_id}",
             input_data=input_data,
         )
+
+        should_fallback = fallback if fallback is not None else self._enable_fallback
+        if not result.success and should_fallback:
+            logger.info("Engaging deterministic fallback for report explanation %s: %s", request.system_id, result.error)
+            return self._fallback_service.explain_report(request.system_id)
 
         # Preserve the deterministic report's system identity.
         if result.success and result.data:
