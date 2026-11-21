@@ -7,11 +7,27 @@ interface StandardsModalProps {
 }
 
 export const StandardsModal: React.FC<StandardsModalProps> = ({ isOpen, onClose }) => {
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="relative w-full max-w-3xl rounded-2xl bg-white border border-slate-200 shadow-2xl p-6 sm:p-8 max-h-[90vh] overflow-y-auto space-y-6">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="standards-modal-title"
+        className="relative w-full max-w-3xl rounded-2xl bg-white border border-slate-200 shadow-2xl p-6 sm:p-8 max-h-[90vh] overflow-y-auto space-y-6"
+      >
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-100">
           <div className="flex items-center space-x-3">
@@ -19,7 +35,7 @@ export const StandardsModal: React.FC<StandardsModalProps> = ({ isOpen, onClose 
               <BookOpen className="w-5 h-5 text-[#5B5BD6]" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-slate-900">
+              <h2 id="standards-modal-title" className="text-lg font-semibold text-slate-900">
                 Post-Quantum Cryptography (PQC) Standards Reference
               </h2>
               <p className="text-xs text-slate-500">
@@ -28,8 +44,10 @@ export const StandardsModal: React.FC<StandardsModalProps> = ({ isOpen, onClose 
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+            aria-label="Close standards reference dialog"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer focus-visible:ring-2 focus-visible:ring-[#5B5BD6]"
           >
             <X className="w-5 h-5" />
           </button>

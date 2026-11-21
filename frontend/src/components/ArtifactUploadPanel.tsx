@@ -326,7 +326,7 @@ export const ArtifactUploadPanel: React.FC = () => {
     }
   };
 
-  const activeMode = uploadModes.find((item) => item.id === mode)!;
+  const activeMode = uploadModes.find((item) => item.id === mode) ?? uploadModes[0];
   const ActiveIcon = activeMode.icon;
 
   return (

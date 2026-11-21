@@ -233,7 +233,9 @@ export const AIFindingExplainer: React.FC<AIFindingExplainerProps> = ({
       <button
         type="button"
         onClick={toggleOpen}
-        className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#5755D9] hover:bg-indigo-50/80 border border-indigo-100 transition cursor-pointer"
+        aria-expanded={isOpen}
+        aria-label={isOpen ? 'Hide AI reasoning for finding' : 'Explain finding with AI'}
+        className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#5755D9] hover:bg-indigo-50/80 border border-indigo-100 transition cursor-pointer focus-visible:ring-2 focus-visible:ring-[#5755D9] focus-visible:outline-none"
       >
         <Sparkles className="w-3.5 h-3.5 text-[#5755D9]" />
 

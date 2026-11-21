@@ -174,6 +174,17 @@ export const AIBankingRiskModal: React.FC<AIBankingRiskModalProps> = ({
     loadExplanation,
   ]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   const handleRetry = () => {
     setExplanationState(null);
     setErrorState(null);
@@ -184,7 +195,12 @@ export const AIBankingRiskModal: React.FC<AIBankingRiskModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ai-banking-risk-title"
+        className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]"
+      >
         <div className="px-6 py-4.5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-slate-50 via-white to-indigo-50/30">
           <div className="flex items-center space-x-2.5">
             <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-[#5755D9]">
@@ -194,7 +210,7 @@ export const AIBankingRiskModal: React.FC<AIBankingRiskModalProps> = ({
               <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-[#5755D9]">
                 AI Banking Risk Intelligence
               </span>
-              <h3 className="text-base font-bold text-slate-900 leading-tight">
+              <h3 id="ai-banking-risk-title" className="text-base font-bold text-slate-900 leading-tight">
                 {profile?.name || 'Banking System'} — Risk Explanation
               </h3>
               <p className="text-[10px] text-slate-400 font-mono mt-0.5">
@@ -205,7 +221,7 @@ export const AIBankingRiskModal: React.FC<AIBankingRiskModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+            className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer focus-visible:ring-2 focus-visible:ring-[#5755D9]"
             aria-label="Close risk explanation"
           >
             <X className="w-5 h-5" />

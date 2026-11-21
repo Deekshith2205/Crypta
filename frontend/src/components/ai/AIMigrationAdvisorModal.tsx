@@ -175,11 +175,28 @@ export const AIMigrationAdvisorModal: React.FC<AIMigrationAdvisorModalProps> = (
     simulationResult,
     upgradeItem,
   ]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ai-migration-advisor-title"
+        className="relative w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]"
+      >
         {/* Header */}
         <div className="px-6 py-4.5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-slate-50 via-white to-indigo-50/30">
           <div className="flex items-center space-x-2.5">
@@ -193,7 +210,7 @@ export const AIMigrationAdvisorModal: React.FC<AIMigrationAdvisorModalProps> = (
                 </span>
                 <span className="text-[11px] text-slate-400 font-mono">· {systemId}</span>
               </div>
-              <h3 className="text-base font-bold text-slate-900 leading-tight">
+              <h3 id="ai-migration-advisor-title" className="text-base font-bold text-slate-900 leading-tight">
                 {systemName} &mdash; Post-Quantum Roadmap Advisory
               </h3>
             </div>
@@ -202,7 +219,8 @@ export const AIMigrationAdvisorModal: React.FC<AIMigrationAdvisorModalProps> = (
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+            aria-label="Close migration advisor dialog"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer focus-visible:ring-2 focus-visible:ring-[#5755D9]"
           >
             <X className="w-5 h-5" />
           </button>
