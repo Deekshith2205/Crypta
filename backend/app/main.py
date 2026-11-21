@@ -6,6 +6,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router as api_router
+from app.security.error_handler import register_exception_handlers
 
 # Configure clean logging
 logging.basicConfig(
@@ -33,6 +34,9 @@ app.add_middleware(
 
 # Register API routes
 app.include_router(api_router, prefix="/api")
+
+# Register security exception handlers to prevent sensitive data leakage
+register_exception_handlers(app)
 
 
 @app.get("/")

@@ -545,7 +545,7 @@ def simulate_post_quantum_migration(request: WhatIfMigrationRequest):
         logger.exception("Unexpected error during migration simulation")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "SIMULATION_INTERNAL_ERROR", "detail": str(e)},
+            content={"error": "SIMULATION_INTERNAL_ERROR", "detail": "An internal error occurred during migration simulation. Please try again."},
         )
 
 
