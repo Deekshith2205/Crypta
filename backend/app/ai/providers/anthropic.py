@@ -14,6 +14,7 @@ from app.ai.providers.base import (
     AIProviderRateLimitError,
     AIProviderUnavailableError,
 )
+from app.ai.providers.resilience import execute_http_with_resilience
 
 logger = logging.getLogger("quantumshield.ai.anthropic")
 
@@ -67,37 +68,23 @@ class AnthropicProvider(BaseAIProvider):
             "temperature": 0.2,
         }
 
-        try:
+        async def _call() -> httpx.Response:
             async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-                response = await client.post(
+                return await client.post(
                     ANTHROPIC_MESSAGES_URL,
                     headers=headers,
                     json=payload,
                 )
 
-            if response.status_code == 429:
-                raise AIProviderRateLimitError("Anthropic quota or rate limit exceeded.")
+        response = await execute_http_with_resilience(
+            _call,
+            provider_name=self.provider_name,
+        )
 
-            if response.status_code != 200:
-                logger.error(
-                    "Anthropic API returned HTTP status %s.",
-                    response.status_code,
-                )
-                raise AIProviderError(f"Anthropic API request failed with HTTP {response.status_code}")
+        data = response.json()
+        content_blocks = data.get("content") or []
+        if not content_blocks:
+            raise AIProviderError("Anthropic API returned empty content blocks.")
 
-            data = response.json()
-            content_blocks = data.get("content") or []
-            if not content_blocks:
-                raise AIProviderError("Anthropic API returned empty content blocks.")
-
-            text = content_blocks[0].get("text", "").strip()
-            return text
-
-        except httpx.TimeoutException as exc:
-            raise AIProviderTimeoutError(f"Anthropic API call timed out after {self._timeout_seconds}s") from exc
-        except (AIProviderError, AIProviderUnavailableError, AIProviderRateLimitError, AIProviderTimeoutError):
-            raise
-        except Exception as exc:
-            raise AIProviderError(
-                "Unexpected error communicating with Anthropic API."
-            ) from exc
+        text = content_blocks[0].get("text", "").strip()
+        return text

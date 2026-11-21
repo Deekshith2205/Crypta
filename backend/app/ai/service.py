@@ -90,13 +90,53 @@ CRITICAL INVARIANTS YOU MUST PRESERVE AT ALL COSTS:
 
 
 def _extract_clean_json(raw_text: str) -> str:
-    """Strips Markdown code fences and whitespace from raw AI output."""
+    """Strips Markdown code fences, extracts outermost JSON structure,
+    normalizes smart quotes, and strips trailing commas from AI output.
+    """
     cleaned = raw_text.strip()
 
-    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
-
+    # 1. Strip Markdown code fences if present
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned, re.IGNORECASE)
     if match:
         cleaned = match.group(1).strip()
+
+    # 2. Extract outermost JSON object {...} or array [...]
+    first_brace = cleaned.find("{")
+    last_brace = cleaned.rfind("}")
+    first_bracket = cleaned.find("[")
+    last_bracket = cleaned.rfind("]")
+
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
+            # Both braces and brackets exist; pick the outermost
+            if first_bracket < first_brace and last_bracket > last_brace:
+                cleaned = cleaned[first_bracket : last_bracket + 1].strip()
+            else:
+                cleaned = cleaned[first_brace : last_brace + 1].strip()
+        else:
+            cleaned = cleaned[first_brace : last_brace + 1].strip()
+    elif first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
+        cleaned = cleaned[first_bracket : last_bracket + 1].strip()
+
+    # Fast path if already valid JSON
+    try:
+        json.loads(cleaned)
+        return cleaned
+    except Exception:
+        pass
+
+    # 3. Normalize smart / curly quotes
+    cleaned = cleaned.replace("“", '"').replace("”", '"')
+    cleaned = cleaned.replace("‘", "'").replace("’", "'")
+
+    try:
+        json.loads(cleaned)
+        return cleaned
+    except Exception:
+        pass
+
+    # 4. Strip trailing commas before closing braces/brackets
+    cleaned = re.sub(r",\s*([\]}])", r"\1", cleaned)
 
     return cleaned
 
