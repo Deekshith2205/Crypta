@@ -155,12 +155,18 @@ The independent application security audit identified the following primary vuln
 - **File:** `backend/app/main.py`
   - Registered `ApiKeyAuthMiddleware`.
 
-### Task B8: Dependency Auditing & Version Constraints
+### Task B8: Dependency Auditing, Version Constraints & Exact Lockfile
+- **File:** `backend/requirements.in` (New)
+  - Direct runtime and test dependency declarations with bounded version ranges.
+- **File:** `backend/requirements.lock` (New)
+  - Deterministic dependency lockfile generated with `pip-compile --generate-hashes` on Python 3.13, containing exact versions and SHA-256 integrity hashes for all wheels and source tarballs.
 - **File:** `backend/requirements.txt`
-  - Constrained all unbounded `>=` dependencies to tested semantic version ranges.
-  - Explicitly declared `PyYAML>=6.0.0,<7.0.0` and `certifi>=2024.2.2`.
-- **File:** `docs/audit-reports/DEPENDENCY_SECURITY_AUDIT.md` (New)
-  - Documented audit results: 0 vulnerabilities found by `pip-audit` and `npm audit`.
+  - Added `reportlab>=4.1.0,<5.0.0` (required for PDF report generation) and documented reproducible installation from `requirements.lock`.
+- **File:** `README.md`
+  - Documented reproducible installation instructions using `python -m pip install --require-hashes -r backend/requirements.lock`.
+- **File:** `docs/audit-reports/DEPENDENCY_SECURITY_AUDIT.md`
+  - Full supply chain audit report: 0 vulnerabilities found by `pip-audit` and `npm audit`.
+  - Verified clean-room virtual environment installation from scratch with 495/495 tests passing.
 
 ---
 
@@ -240,7 +246,7 @@ dist/assets/index-ByntueCy.js   458.92 kB │ gzip: 116.17 kB
 
 ### 7.3 Dependency Audit Results
 ```text
-$ python -m pip_audit -r backend/requirements.txt
+$ python -m pip_audit -r backend/requirements.lock
 No known vulnerabilities found
 
 $ cd frontend && npm audit
@@ -293,5 +299,5 @@ Phase B hardening brings QuantumShield to enterprise banking compliance standard
 - [x] **Task B5 (CORS Hardening):** Removed wildcard origins with credentials; enforced explicit environment-driven origins.
 - [x] **Task B6 (Limits & Security Headers):** Enforced 5 MiB request size limit with HTTP 413; attached security headers and no-store caching.
 - [x] **Task B7 (API-Key Auth):** Added optional `QS_API_KEY` authentication with constant-time comparison and open `/api/health`.
-- [x] **Task B8 (Dependency Auditing):** Audited Python and Node dependencies with `pip-audit` and `npm audit` (0 vulnerabilities found) and pinned version ranges.
+- [x] **Task B8 (Dependency Auditing & Exact Lockfile):** Audited Python and Node dependencies with `pip-audit` and `npm audit` (0 vulnerabilities found), generated exact SHA-256 hashed `backend/requirements.lock` via `pip-compile`, and verified clean virtual environment installation.
 - [x] **Full Regression Passing:** 495 backend tests passing, 15 frontend tests passing, oxlint clean, vite build clean.

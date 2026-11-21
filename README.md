@@ -204,10 +204,34 @@ Internal controls such as pod-to-pod mTLS, database column-level encryption, KMS
 
 Run all backend commands from the Quantum_Shield repository root.
 
+#### 1. Reproducible Installation (Recommended)
+Install exact, cryptographically verified dependencies from the lockfile:
 ```bash
-# Install backend dependencies
-python -m pip install -r backend/requirements.txt
+python -m pip install --require-hashes -r backend/requirements.lock
+```
+*Why install from the lockfile?*
+Installing from `backend/requirements.lock` guarantees that direct and transitive dependencies match the tested dependency tree bit-for-bit, with SHA-256 integrity hashes preventing supply chain tampering or breaking minor/patch version drift.
 
+#### 2. Development / Loose Installation
+Alternatively, install loose dependencies from semantic version ranges:
+```bash
+python -m pip install -r backend/requirements.txt
+```
+
+#### 3. Lockfile Maintenance & Audits
+- **Target Python Version:** Python 3.13.x (architecture-independent wheels and source distributions). Note: binary wheels with C extensions (`cryptography`, `cffi`, `watchfiles`) are pinned to compatible ABI architectures.
+- **Run Backend Vulnerability Audit:**
+  ```bash
+  python -m pip_audit -r backend/requirements.lock
+  ```
+- **Update or Regenerate Lockfile:**
+  Edit constraints in `backend/requirements.in`, then recompile with exact hashes:
+  ```bash
+  python -m piptools compile backend/requirements.in --generate-hashes -o backend/requirements.lock
+  ```
+
+#### 4. Run Server
+```bash
 # Start the FastAPI backend server
 python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload
 ```

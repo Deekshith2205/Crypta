@@ -1,142 +1,131 @@
 # Dependency Security & Vulnerability Audit Report
 
-**Platform:** QuantumShield — Banking Quantum Readiness & Remediation Engine  
-**Branch:** `janya`  
-**Task:** Task B8 (Phase B: Security Hardening)  
-**Date:** November 2026  
-**Status:** Completed & Verified  
+**Platform:** QuantumShield — Banking Quantum Readiness & Remediation Engine
+**Branch:** `janya`
+**Task:** Task B8 (Phase B: Security Hardening — Backend Lockfile & Reproducibility)
+**Date:** November 2026
+**Status:** Completed & Verified (Verdict: PASS)
 
 ---
 
 ## 1. Executive Summary
 
-As part of Phase B (Security Hardening), a comprehensive software supply chain and dependency security audit was conducted across both the Python backend and React/TypeScript frontend.
+As part of Phase B (Security Hardening, Task B8), a comprehensive software supply chain, dependency security, and reproducibility audit was conducted across both the Python backend and React/TypeScript frontend.
 
-The audit evaluated all direct runtime dependencies, development tooling, and transitive packages against known vulnerabilities (CVEs and vendor security advisories) using authoritative security scanning utilities:
-- **Backend (Python):** `pip-audit` v2.10.1 querying the PyPI Advisory Database and Google OSV API.
-- **Frontend (Node.js):** `npm audit` querying the npm Advisory Database.
+To resolve the independent security audit's PARTIAL finding regarding loose semantic ranges, an exact, cryptographically hashed backend lockfile (`backend/requirements.lock`) was introduced alongside `backend/requirements.in`.
 
-**Audit Verdict:**
-- **`backend/requirements.txt`:** 0 known vulnerabilities found across all direct runtime dependencies.
-- **`frontend/package.json`:** 0 known vulnerabilities found across all production and development dependencies.
-- **Version Pinning:** Unbounded floating dependencies (`>=`) were replaced with upper-bounded, tested semantic version constraints to prevent supply chain drift and breaking API changes.
-
----
-
-## 2. Python Dependency Security Audit
-
-### 2.1 Scanner Configuration
-- **Tool:** `pip-audit` 2.10.1
-- **Vulnerability Database:** PyPI Advisory Database & Open Source Vulnerabilities (OSV)
-- **Target File:** `backend/requirements.txt`
-
-### 2.2 Scanned Direct Dependencies
-
-| Package | Constrained Range | Installed Version | Vulnerabilities Found | Status |
-| :--- | :--- | :--- | :--- | :--- |
-| `fastapi` | `>=0.110.0,<0.136.0` | `0.135.2` | None (0) | PASSED |
-| `uvicorn[standard]` | `>=0.28.0,<1.0.0` | `0.42.0` | None (0) | PASSED |
-| `pydantic` | `>=2.6.0,<3.0.0` | `2.12.5` | None (0) | PASSED |
-| `cryptography` | `>=42.0.0,<51.0.0` | `50.0.2` | None (0) | PASSED |
-| `pytest` | `>=8.0.0,<10.0.0` | `9.1.1` | None (0) | PASSED |
-| `pytest-asyncio` | `>=0.23.0,<2.0.0` | `1.4.1` | None (0) | PASSED |
-| `httpx` | `>=0.27.0,<1.0.0` | `0.28.1` | None (0) | PASSED |
-| `dnspython` | `>=2.8.0,<3.0.0` | `2.8.0` | None (0) | PASSED |
-| `PyYAML` | `>=6.0.0,<7.0.0` | `6.0.2` | None (0) | PASSED |
-| `certifi` | `>=2024.2.2` | `2025.1.31` | None (0) | PASSED |
-
-### 2.3 Command Output
-```text
-$ python -m pip_audit -r backend/requirements.txt
-No known vulnerabilities found
-```
-
-### 2.4 Analysis of Global Environment Artifacts
-During the host-level environment scan (`pip-audit`), several legacy packages residing in the host Python environment were detected (such as `pillow`, `tornado`, `soupsieve`, and `pymongo`). 
-
-**QuantumShield Isolation Assessment:**
-- QuantumShield does **not** import, reference, or depend upon `pillow`, `tornado`, `pymongo`, or `soupsieve`.
-- Runtime execution is strictly isolated to FastAPI, Starlette, Uvicorn, Pydantic, Cryptography, and dnspython.
-- Transitive runtime dependencies (`starlette`, `urllib3`, `certifi`) are monitored and constrained.
+### Audit & Verification Verdict:
+- **`backend/requirements.lock`:** 0 known vulnerabilities found across all direct and transitive dependencies via `pip-audit`.
+- **`frontend/package-lock.json`:** 0 known vulnerabilities found across all production and development dependencies via `npm audit`.
+- **Reproducible Installation:** Verified from scratch in a fresh temporary virtual environment (`$env:TEMP/qs_test_venv_b8`) using `pip install --require-hashes -r backend/requirements.lock`.
+- **Clean Environment Test Suite:** All 495 backend unit, integration, and security tests passed in the isolated environment.
 
 ---
 
-## 3. Frontend Dependency Security Audit
+## 2. Python Dependency Declarations & Exact Lockfile Architecture
 
-### 3.1 Scanner Configuration
-- **Tool:** `npm audit` (Node.js package manager)
-- **Vulnerability Database:** npm Advisory Database / GitHub Advisory Database
-- **Target Files:** `frontend/package.json`, `frontend/package-lock.json`
+### 2.1 File Structure
+1. **`backend/requirements.in`**: Source of direct runtime and test dependency requirements with bounded semantic version ranges.
+2. **`backend/requirements.lock`**: Fully resolved, deterministic dependency tree pinning exact versions and multiple SHA-256 integrity hashes for all wheels and source distributions.
+3. **`backend/requirements.txt`**: Backward-compatible specification documenting both loose and reproducible installation modes.
 
-### 3.2 Inventory of Dependencies
+### 2.2 Direct Dependency Declarations (`backend/requirements.in`)
 
-#### Production Dependencies (`dependencies`)
-| Package | Version Spec | Purpose | Vulnerabilities Found | Status |
-| :--- | :--- | :--- | :--- | :--- |
-| `react` | `^19.3.1` | UI View Framework | None (0) | PASSED |
-| `react-dom` | `^19.3.1` | DOM Renderer for React | None (0) | PASSED |
-| `lucide-react` | `^1.64.0` | High-fidelity UI icon library | None (0) | PASSED |
-
-#### Development Dependencies (`devDependencies`)
-| Package | Version Spec | Purpose | Vulnerabilities Found | Status |
-| :--- | :--- | :--- | :--- | :--- |
-| `vite` | `^8.3.5` | Fast build tool and dev server | None (0) | PASSED |
-| `@vitejs/plugin-react` | `^6.1.2` | React Fast Refresh for Vite | None (0) | PASSED |
-| `typescript` | `~7.0.2` | Static type checker | None (0) | PASSED |
-| `oxlint` | `^1.89.0` | High-performance linter | None (0) | PASSED |
-| `tailwindcss` | `^4.3.3` | Utility-first CSS styling engine | None (0) | PASSED |
-| `@tailwindcss/vite` | `^4.3.3` | Tailwind v4 Vite compiler plugin | None (0) | PASSED |
-| `@types/*` | `^19.x / ^24.x` | TypeScript type declarations | None (0) | PASSED |
-
-### 3.3 Command Output
-```text
-$ cd frontend && npm audit
-found 0 vulnerabilities
-```
-
----
-
-## 4. Remediations & Version Constraints Applied
-
-### 4.1 Previous State vs. Hardened State in `backend/requirements.txt`
-
-| Dependency | Previous Unbounded Spec | Hardened Constrained Spec | Justification |
+| Package | Bounded Range | Locked Version | Role / Justification |
 | :--- | :--- | :--- | :--- |
-| `fastapi` | `fastapi>=0.110.0` | `fastapi>=0.110.0,<0.136.0` | Prevents unexpected breaking changes in routing and dependency injection |
-| `uvicorn[standard]` | `uvicorn[standard]>=0.28.0` | `uvicorn[standard]>=0.28.0,<1.0.0` | Constrains ASGI server to 0.x stable branch |
-| `pydantic` | `pydantic>=2.6.0` | `pydantic>=2.6.0,<3.0.0` | Locks to Pydantic v2 API |
-| `cryptography` | `cryptography>=42.0.0` | `cryptography>=42.0.0,<51.0.0` | Pins tested OpenSSL / PyCA bindings |
-| `pytest` | `pytest>=8.0.0` | `pytest>=8.0.0,<10.0.0` | Ensures test framework API consistency |
-| `pytest-asyncio` | `pytest-asyncio>=0.23.0` | `pytest-asyncio>=0.23.0,<2.0.0` | Enforces asyncio test runner compatibility |
-| `httpx` | `httpx>=0.27.0` | `httpx>=0.27.0,<1.0.0` | Locks HTTP client for ASGI testing |
-| `dnspython` | `dnspython>=2.8.0` | `dnspython>=2.8.0,<3.0.0` | Ensures resolver API stability for SSRF defense |
-| `PyYAML` | *(implicit / unlisted)* | `PyYAML>=6.0.0,<7.0.0` | Explicitly pins safe YAML parsing library |
-| `certifi` | *(implicit / unlisted)* | `certifi>=2024.2.2` | Ensures trusted root CA certificate store is declared |
+| `fastapi` | `>=0.110.0,<0.136.0` | `0.135.4` | Core ASGI web framework and routing |
+| `uvicorn[standard]` | `>=0.28.0,<1.0.0` | `0.54.0` | Production ASGI web server with standard event loop/parsers |
+| `pydantic` | `>=2.6.0,<3.0.0` | `2.14.4` | Data modeling, validation, and schema generation (v2 API) |
+| `cryptography` | `>=42.0.0,<51.0.0` | `50.0.2` | Cryptographic primitives, X.509 certificate parsing |
+| `pytest` | `>=8.0.0,<10.0.0` | `9.2.0` | Test runner and test execution framework |
+| `pytest-asyncio` | `>=0.23.0,<2.0.0` | `1.5.0` | Asyncio fixtures and coroutine testing |
+| `httpx` | `>=0.27.0,<1.0.0` | `0.28.1` | HTTP client for ASGI integration tests and REST AI provider calls |
+| `dnspython` | `>=2.8.0,<3.0.0` | `2.9.2` | DNS resolver for SSRF target IP inspection |
+| `PyYAML` | `>=6.0.0,<7.0.0` | `6.0.4` | Hardened YAML configuration parsing |
+| `certifi` | `>=2024.2.2` | `2026.11.20` | Authoritative Mozilla CA certificate bundle |
+| `reportlab` | `>=4.1.0,<5.0.0` | `4.5.1` | PDF executive report generator (`app.services.report_service`) |
+
+*Note on `reportlab`:* During initial clean-room installation verification, `reportlab` was discovered as a required runtime import for PDF report generation (`/api/banking/systems/{id}/report/pdf`). It was formally added to `requirements.in` and pinned in `requirements.lock`.
+
+### 2.3 Lockfile Generation
+- **Target Python Version:** Python 3.13.1
+- **Tooling:** `pip-tools` (v7.7.0) / `pip-compile`
+- **Exact Compilation Command:**
+  ```powershell
+  python -m piptools compile backend/requirements.in --generate-hashes -o backend/requirements.lock
+  ```
 
 ---
 
-## 5. Accepted Risks & Compensating Controls
+## 3. Clean-Room Installation & Functional Verification
 
-| Potential Risk Area | Assessment | Compensating Architectural Control in QuantumShield |
-| :--- | :--- | :--- |
-| **Parser Denial of Service** | Malformed or maliciously crafted config files (YAML, JSON, XML) could attempt CPU/memory exhaustion. | Enforced strict `SafeConfigParser` limits (Task B1): max depth <= 20, max nodes <= 5,000, alias count <= 5, string length <= 65,536, and forbidden XML DOCTYPE/ENTITY. |
-| **Request Flooding & ReDoS** | High-volume endpoint abuse could exhaust server concurrency or thread workers. | `InMemoryRateLimiter` (Task B2) enforces sliding-window limits per client IP (10/min scan, 5/min upload/AI) and 5 concurrent scan slots with bounded storage. |
-| **Internal Target Scanning (SSRF)** | Attackers supplying internal IPs or disallowed service ports to external scanners. | Strict IP validation (`is_safe_public_ip`) and explicit port allowlisting (`DEFAULT_ALLOWED_SCAN_PORTS = {443, 8443, 993, 995, 465}`) (Task B3). |
-| **Large Payload Flooding** | Clients sending oversized multi-megabyte payloads to exhaust memory. | `RequestSizeLimitMiddleware` (Task B6) enforces a strict 5 MiB ceiling and returns HTTP 413 before parsing. |
-| **Sensitive Data Exposure** | Exceptions returning file paths, credentials, or internal IPs. | `sanitize_error_detail` (Task B4) strips Windows/Linux paths, DB URIs, and credentials from all error responses. |
-
----
-
-## 6. Verification & Reproducibility
-
-The dependency audit can be reproduced at any time using the following commands from the repository root:
+### 3.1 Clean Virtual Environment Verification Process
+To prove reproducibility beyond the developer's local environment, an isolated temporary virtual environment was provisioned:
 
 ```powershell
-# 1. Audit Python backend dependencies
-python -m pip_audit -r backend/requirements.txt
+$tempVenv = Join-Path $env:TEMP "qs_test_venv_b8"
+python -m venv $tempVenv
+$tempPython = Join-Path $tempVenv "Scripts\python.exe"
 
-# 2. Audit Node.js frontend dependencies
-cd frontend
-npm audit
-cd ..
+# Install strictly from the lockfile with mandatory hash checking
+& $tempPython -m pip install --require-hashes -r backend/requirements.lock
 ```
+
+### 3.2 Verification Results
+- **Installation Status:** Succeeded with exit code 0.
+- **Integrity Validation:** Every downloaded package was verified against its SHA-256 hash.
+- **Import Verification:**
+  ```text
+  $ & $tempPython -c "import app.main; print('Import success:', app.main.app.title)"
+  Import success: QuantumShield API
+  ```
+- **Test Suite Execution in Clean Venv:**
+  ```text
+  $ & $tempPython -m pytest -q backend/tests
+  ............................................................... [100%]
+  495 passed, 2 warnings in 15.81s
+  ```
+
+---
+
+## 4. Vulnerability & Supply Chain Security Audit
+
+### 4.1 Python Backend Audit (`backend/requirements.lock`)
+- **Scanner:** `pip-audit` v2.10.1
+- **Command:** `python -m pip_audit -r backend/requirements.lock`
+- **Database:** PyPI Advisory Database & Open Source Vulnerabilities (OSV)
+- **Result:**
+  ```text
+  No known vulnerabilities found
+  ```
+- **Vulnerabilities Found:** 0
+
+### 4.2 Node.js Frontend Audit (`frontend/package.json` & `package-lock.json`)
+- **Scanner:** `npm audit`
+- **Command:** `npm.cmd --prefix frontend audit`
+- **Database:** npm / GitHub Security Advisory Database
+- **Result:**
+  ```text
+  found 0 vulnerabilities
+  ```
+- **Vulnerabilities Found:** 0
+
+---
+
+## 5. Limitations & Platform Considerations
+
+1. **Python ABI & Binary Wheel Compatibility:**
+   `backend/requirements.lock` includes SHA-256 hashes for source distributions (`sdist`) and standard pre-compiled platform wheels for C-extension packages (`cryptography`, `cffi`, `watchfiles`, `pillow`, `reportlab`). The lockfile is targeted at **Python 3.13**. Environments using other major Python versions (e.g. 3.11 or 3.12) should recompile using `pip-compile` on that specific version.
+2. **Deterministic Installation Command:**
+   Production pipelines and CI/CD runners must always invoke `pip install --require-hashes -r backend/requirements.lock` rather than `pip install -r backend/requirements.txt` to guarantee deterministic builds.
+
+---
+
+## 6. Files Changed in Task B8
+
+- `backend/requirements.in` (NEW): Direct dependency constraints for `pip-compile`.
+- `backend/requirements.lock` (NEW): Exact locked package versions and multi-distribution SHA-256 hashes.
+- `backend/requirements.txt` (MODIFIED): Documented lockfile usage and added `reportlab>=4.1.0,<5.0.0`.
+- `README.md` (MODIFIED): Added reproducible installation and lockfile maintenance instructions.
+- `docs/audit-reports/DEPENDENCY_SECURITY_AUDIT.md` (MODIFIED): Comprehensive lockfile and verification documentation.
+- `docs/audit-reports/PHASE_B_AUDIT_REPORT.md` (MODIFIED): Updated Task B8 status from PARTIAL to PASS.
