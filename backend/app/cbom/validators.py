@@ -100,6 +100,27 @@ class CBOMValidator:
                 if asset_type not in self.ALLOWED_ASSET_TYPES:
                     issues.append(f"Component '{bom_ref}' has unsupported assetType '{asset_type}'")
 
+            # Invariant 1: CBOM is an INVENTORY, NOT a risk engine
+            props = comp.get("properties", [])
+            if isinstance(props, list):
+                for p in props:
+                    if isinstance(p, dict):
+                        p_name = str(p.get("name", "")).lower()
+                        p_val = str(p.get("value", "")).strip().upper()
+                        if p_name in {
+                            "banking:priority_score",
+                            "banking:priority_band",
+                            "quantumshield:risk_score",
+                            "quantumshield:priority",
+                            "priority_score",
+                            "priority_band",
+                            "risk_score",
+                        } or p_val in {"P0", "P1", "P2", "P3"}:
+                            issues.append(
+                                f"Component '{bom_ref}' violates Invariant 1: CBOM is an inventory, not a risk engine. "
+                                f"Prohibited risk property '{p.get('name')}'='{p.get('value')}' found."
+                            )
+
         # 4. Dependency referential integrity
         dependencies = data.get("dependencies", [])
         for dep in dependencies:
