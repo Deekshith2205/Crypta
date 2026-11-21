@@ -728,6 +728,11 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
                     <span className="text-xs font-bold text-slate-900 tracking-wide flex items-center space-x-2">
                       <Lock className="w-4 h-4 text-[#5755D9]" />
                       <span>Key Protection Chain Hierarchy</span>
+                      {risk?.key_protection?.agility_rating && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">
+                          Agility: {risk.key_protection.agility_rating} ({risk.key_protection.agility_score ?? 'N/A'}/100)
+                        </span>
+                      )}
                     </span>
 
                     <span className="text-[10px] font-mono text-[#5755D9]">

@@ -409,6 +409,9 @@ export type KeyChainAnalysis = {
   authentication_algorithm?: string;
   primary_migration_dependencies: string[];
   notes: string;
+  agility_score?: number;
+  agility_rating?: string;
+  agility_rationale?: string;
 };
 
 export type TechnicalRiskContext = {
@@ -710,6 +713,8 @@ export type CompleteAssessmentReport = {
   what_if_results?: Record<string, unknown> | null;
   audit: AuditRecord;
   audit_metadata: AuditRecord;
+  zero_trust?: Record<string, unknown> | null;
+  compliance_mappings?: Record<string, unknown> | null;
   ai_advisory?: Record<string, unknown> | null;
 };
 
