@@ -24,7 +24,14 @@ from app.services.assessment_service import AssessmentService
 from app.services.audit_service import AuditService
 from app.scanners.domain_validator import DomainValidationError
 from app.security.network import UnsafeTargetError, DnsResolutionError
-from app.security.rate_limiter import DEFAULT_RATE_LIMITER, SCAN_SEMAPHORE, MAX_CONCURRENT_SCANS
+from app.security.rate_limiter import (
+    DEFAULT_RATE_LIMITER,
+    UPLOAD_SCAN_RATE_LIMITER,
+    AI_RATE_LIMITER,
+    SCAN_SEMAPHORE,
+    MAX_CONCURRENT_SCANS,
+    get_client_ip,
+)
 from app.scanners.tls_scanner import TlsScanError, TlsTimeoutError, TlsConnectionError
 from app.ai.service import DEFAULT_AI_SERVICE
 from app.ai.schemas import (
@@ -89,13 +96,8 @@ async def run_scan(request: ScanRequest, http_request: Request):
             },
         )
 
-    # Use the direct connection address; never trust caller-supplied
-    # X-Forwarded-For unless a trusted proxy is explicitly configured.
-    client_ip = (
-        http_request.client.host
-        if http_request.client
-        else "127.0.0.1"
-    )
+    # Extract client IP safely (respecting explicit trusted proxy configuration)
+    client_ip = get_client_ip(http_request)
 
     # Enforce in-memory sliding window rate limit (10 scans / min / IP)
     allowed, retry_after = DEFAULT_RATE_LIMITER.is_allowed(client_ip)
@@ -247,13 +249,8 @@ async def run_audit(request: AuditRequest, http_request: Request):
             },
         )
 
-    # Use the direct connection address; never trust caller-supplied
-    # X-Forwarded-For unless a trusted proxy is explicitly configured.
-    client_ip = (
-        http_request.client.host
-        if http_request.client
-        else "127.0.0.1"
-    )
+    # Extract client IP safely (respecting explicit trusted proxy configuration)
+    client_ip = get_client_ip(http_request)
 
     # Enforce sliding window rate limit
     allowed, retry_after = DEFAULT_RATE_LIMITER.is_allowed(client_ip)
@@ -592,11 +589,22 @@ def verify_audit_chain_endpoint(records_data: List[Dict[str, Any]]):
 
 
 @router.post("/scan/config", tags=["Configuration Scanning"])
-def scan_uploaded_config(payload: ConfigScanRequest):
+def scan_uploaded_config(payload: ConfigScanRequest, http_request: Request):
     """
     Safely scans uploaded configuration files without executing them.
     Files are stored temporarily and removed after scanning.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = UPLOAD_SCAN_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (upload scan). Please try again in {retry_after} seconds.",
+            },
+        )
     from app.scanners.config_scanner import BankingConfigScanner
     from app.services.finding_normalizer import normalize_config_finding
     from app.scanners.crypto_misuse.evidence import is_binary_content
@@ -758,11 +766,22 @@ def scan_uploaded_config(payload: ConfigScanRequest):
 
 
 @router.post("/scan/code", tags=["Code Scanning"])
-def scan_uploaded_code(payload: CodeScanRequest):
+def scan_uploaded_code(payload: CodeScanRequest, http_request: Request):
     """
     Safely scans uploaded source files for cryptographic misuse.
     Source code is analyzed in memory and is never executed.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = UPLOAD_SCAN_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (upload scan). Please try again in {retry_after} seconds.",
+            },
+        )
     from app.scanners.crypto_misuse.scanner import (
         CryptoMisuseScanner,
         EXTENSION_TO_LANGUAGE,
@@ -904,10 +923,21 @@ def scan_uploaded_code(payload: CodeScanRequest):
 
 
 @router.post("/scan/cert", tags=["Certificate Scanning"])
-def scan_uploaded_certificate(payload: CertificateScanRequest):
+def scan_uploaded_certificate(payload: CertificateScanRequest, http_request: Request):
     """
     Safely parses an uploaded PEM certificate without contacting external systems.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = UPLOAD_SCAN_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (upload scan). Please try again in {retry_after} seconds.",
+            },
+        )
     from app.scanners.certificate_parser import parse_pem_certificate
     from app.scanners.crypto_misuse.evidence import is_binary_content
 
@@ -1022,8 +1052,19 @@ def scan_uploaded_certificate(payload: CertificateScanRequest):
 # ============================================================================
 
 @router.get("/ai/status", response_model=AIStatusResponse, tags=["AI Readiness Intelligence"])
-def get_ai_status():
+def get_ai_status(http_request: Request):
     """Returns the current operational status of the AI intelligence layer."""
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+            },
+        )
     return DEFAULT_AI_SERVICE.get_status()
 
 
@@ -1032,11 +1073,22 @@ def get_ai_status():
     response_model=AIExplanationResult[FindingExplanationResponse],
     tags=["AI Readiness Intelligence"],
 )
-async def explain_finding_endpoint(payload: FindingExplanationRequest):
+async def explain_finding_endpoint(payload: FindingExplanationRequest, http_request: Request):
     """
     Generates an AI-powered contextual explanation for an individual scanner finding.
     Grounded strictly in verified evidence; preserves NOT_OBSERVABLE != VULNERABLE.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+            },
+        )
     return await DEFAULT_AI_SERVICE.explain_finding(payload)
 
 
@@ -1045,11 +1097,22 @@ async def explain_finding_endpoint(payload: FindingExplanationRequest):
     response_model=AIExplanationResult[BankingRiskExplanationResponse],
     tags=["AI Readiness Intelligence"],
 )
-async def explain_banking_risk_endpoint(payload: BankingRiskExplanationRequest):
+async def explain_banking_risk_endpoint(payload: BankingRiskExplanationRequest, http_request: Request):
     """
     Explains the deterministic factors behind a banking system's risk score and upgrade queue placement.
     Never recalculates or modifies the deterministic score or priority ranking.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+            },
+        )
     return await DEFAULT_AI_SERVICE.explain_banking_risk(payload)
 
 
@@ -1058,11 +1121,22 @@ async def explain_banking_risk_endpoint(payload: BankingRiskExplanationRequest):
     response_model=AIExplanationResult[MigrationAdvisoryResponse],
     tags=["AI Readiness Intelligence"],
 )
-async def advise_migration_endpoint(payload: MigrationAdvisoryRequest):
+async def advise_migration_endpoint(payload: MigrationAdvisoryRequest, http_request: Request):
     """
     AI migration advisor providing architectural guidance, operational considerations,
     and phased migration milestones based on deterministic upgrade plan data.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+            },
+        )
     return await DEFAULT_AI_SERVICE.advise_migration(payload)
 
 
@@ -1071,11 +1145,22 @@ async def advise_migration_endpoint(payload: MigrationAdvisoryRequest):
     response_model=AIExplanationResult[ReportExplanationResponse],
     tags=["AI Readiness Intelligence"],
 )
-async def explain_report_endpoint(payload: ReportExplanationRequest):
+async def explain_report_endpoint(payload: ReportExplanationRequest, http_request: Request):
     """
     Generates executive and technical narrative summaries for a banking assessment report.
     Content is strictly marked as advisory and informational.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+            },
+        )
     from app.models.profiles import get_synthetic_profile_by_id
     from app.services.report_service import build_complete_json_report
 
