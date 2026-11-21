@@ -53,6 +53,109 @@ class ZeroTrustAssessment(BaseModel):
     continuous_verification_control: ZeroTrustControl = Field(..., description="Session Integrity & Continuous Re-evaluation")
     findings: List[AuditFinding] = Field(default_factory=list, description="Zero Trust audit findings")
 
+    def get_all_controls(self) -> List[ZeroTrustControl]:
+        """Returns all 6 NIST SP 800-207 Zero Trust controls."""
+        return [
+            self.identity_control,
+            self.context_control,
+            self.resource_control,
+            self.policy_control,
+            self.least_privilege_control,
+            self.continuous_verification_control,
+        ]
+
+    def compute_zero_trust_summary(self) -> Dict[str, Any]:
+        """Calculates honest Zero Trust posture metrics across the 6 pillars."""
+        controls = self.get_all_controls()
+        verified = sum(1 for c in controls if c.status == ZeroTrustControlStatus.VERIFIED)
+        unverified = sum(1 for c in controls if c.status == ZeroTrustControlStatus.UNVERIFIED)
+        not_observable = sum(1 for c in controls if c.status == ZeroTrustControlStatus.NOT_OBSERVABLE_EXTERNALLY)
+        partially = sum(1 for c in controls if c.status == ZeroTrustControlStatus.PARTIALLY_VERIFIED)
+
+        if self.resource_control.status == ZeroTrustControlStatus.VERIFIED and not_observable >= 4:
+            posture_label = "EDGE_ENCRYPTED_INTERNAL_UNKNOWN"
+        elif verified == 6:
+            posture_label = "FULLY_VERIFIED_ZERO_TRUST"
+        elif unverified > 0:
+            posture_label = "DEFICIENT_ZERO_TRUST"
+        else:
+            posture_label = "PARTIALLY_VERIFIED"
+
+        return {
+            "verified_count": verified,
+            "partially_verified_count": partially,
+            "not_observable_count": not_observable,
+            "unverified_count": unverified,
+            "posture_label": posture_label,
+            "observational_honesty_statement": (
+                "NOT_OBSERVABLE_EXTERNALLY controls reflect external perimeter vantage point limitations "
+                "and are NOT penalized as vulnerabilities per NIST SP 800-207 guidelines."
+            ),
+        }
+
+
+def build_zero_trust_assessment(
+    asset_id: str,
+    tls_version: str = "TLSv1.3",
+    asset: Optional[Any] = None,
+) -> ZeroTrustAssessment:
+    """
+    Constructs an observability-honest NIST SP 800-207 Zero Trust assessment.
+    Integrates observable edge TLS and incorporates declared asset evidence where available.
+    """
+    zt = build_default_zero_trust_assessment(asset_id, tls_version=tls_version)
+
+    if not asset:
+        return zt
+
+    # Inspect asset layers and evidence items if available
+    layers = getattr(asset, "layers", {}) or {}
+    evidence_items = getattr(asset, "evidence_items", []) or []
+
+    all_evidence = list(evidence_items)
+    for layer_items in layers.values():
+        if isinstance(layer_items, list):
+            all_evidence.extend(layer_items)
+
+    for item in all_evidence:
+        ctrl_name = getattr(item, "control", "") or ""
+        val = getattr(item, "value", "") or ""
+        obs = getattr(item, "observability", None)
+        obs_val = getattr(obs, "value", str(obs)) if obs else "OBSERVED"
+
+        # Check for internal mTLS / identity evidence
+        if any(kw in ctrl_name.lower() or kw in val.lower() for kw in ["mtls", "spiffe", "spire", "client cert"]):
+            zt.identity_control.status = ZeroTrustControlStatus.VERIFIED
+            zt.identity_control.observability = ObservabilityState.OBSERVED
+            zt.identity_control.evidence = f"Internal identity verified: {val}"
+            zt.identity_control.notes = f"Sourced from {getattr(item, 'source', 'internal evidence')}"
+
+        # Check for dynamic PDP / policy evidence
+        if any(kw in ctrl_name.lower() or kw in val.lower() for kw in ["pdp", "policy decision", "opa", "open policy agent", "rbac"]):
+            zt.policy_control.status = ZeroTrustControlStatus.VERIFIED
+            zt.policy_control.observability = ObservabilityState.OBSERVED
+            zt.policy_control.evidence = f"Policy engine verified: {val}"
+
+        # Check for device posture / context
+        if any(kw in ctrl_name.lower() or kw in val.lower() for kw in ["edr", "device posture", "mdm", "device context"]):
+            zt.context_control.status = ZeroTrustControlStatus.VERIFIED
+            zt.context_control.observability = ObservabilityState.OBSERVED
+            zt.context_control.evidence = f"Device posture verified: {val}"
+
+        # Check for least privilege
+        if any(kw in ctrl_name.lower() or kw in val.lower() for kw in ["least privilege", "scope restriction", "abac"]):
+            zt.least_privilege_control.status = ZeroTrustControlStatus.VERIFIED
+            zt.least_privilege_control.observability = ObservabilityState.OBSERVED
+            zt.least_privilege_control.evidence = f"Least privilege verified: {val}"
+
+        # Check for continuous session verification
+        if any(kw in ctrl_name.lower() or kw in val.lower() for kw in ["continuous verification", "re-authentication", "continuous session"]):
+            zt.continuous_verification_control.status = ZeroTrustControlStatus.VERIFIED
+            zt.continuous_verification_control.observability = ObservabilityState.OBSERVED
+            zt.continuous_verification_control.evidence = f"Continuous verification verified: {val}"
+
+    return zt
+
 
 def build_default_zero_trust_assessment(asset_id: str, tls_version: str = "TLSv1.3") -> ZeroTrustAssessment:
     """
