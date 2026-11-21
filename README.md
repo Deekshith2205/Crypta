@@ -252,18 +252,18 @@ Open a separate terminal at the Quantum_Shield repository root.
 # Navigate to the frontend
 cd frontend
 
-# Install frontend dependencies
-npm install
+# Install frontend dependencies (deterministic install)
+npm ci
 
 # Start the Vite development server
 npm run dev
 
-# Run frontend tests
+# Run frontend tests (node:test)
 npm test
 
 # Run frontend type-check, lint, and production build
-npm exec -- tsc -p tsconfig.app.json --noEmit
-npm run lint
+npx tsc --noEmit
+npx oxlint
 npm run build
 ```
 
@@ -277,13 +277,13 @@ http://127.0.0.1:5173
 
 ```bash
 # Run all backend unit, integration, and security regression tests
-python -m pytest -q
+pytest backend/tests
 
 # Run frontend tests
 cd frontend && npm test
 ```
 
-Includes **426 passing backend unit, integration, and security tests** and **15 passing frontend tests** covering:
+Includes **715 passing backend unit, integration, and security tests** and **71 passing frontend tests** covering:
 - What-If Post-Quantum Migration Simulator (`app.services.migration_simulator`, `app.models.simulation`)
 - Zero-mutation deep-copy semantics and profile immutability
 - Strict migration target algorithm allow-list and validation rejection (422)
@@ -744,3 +744,78 @@ QuantumShield incorporates a secure, resilient, and cryptographically verified A
 ### 15.8 Adversarial Test Suite (Task D7)
 - 23 comprehensive adversarial tests verifying prompt injection defeat, delimiter isolation, secret redaction, invariant enforcement, budget exhaustion blocking, fallback engagement, and tamper detection.
 
+---
+
+## 16. Reports, CBOM & TLS Hardening (Phase F)
+
+Phase F completes the reporting, Cryptographic Bill of Materials (CBOM), and TLS network inspection subsystem:
+
+### 16.1 CycloneDX 1.7 CBOM Generation and Verification
+- **CycloneDX 1.7 Conformance**: Deterministic generation of Cryptographic Bill of Materials adhering to the CycloneDX 1.7 cryptographic asset specification (`bomFormat: "CycloneDX"`, `specVersion: "1.7"`).
+- **URN-Based Serial Number**: UUIDv5 URN serial numbers generated deterministically from canonical profile hashes.
+- **Pure Inventory Discipline**: The CBOM documents raw cryptographic algorithm assets, key lengths, parameter sets, and execution modes. It strictly segregates inventory from evaluation metrics (no risk scores or priority bands injected into CBOM schema).
+- **Referential Integrity**: Components maintain valid BOM references (`bom-ref`) and dependency graphs without broken dependencies or dangling references.
+
+### 16.2 Executive Compliance and Upgrade Reports
+- **Multi-Format Export**: Generates executive PDF reports via ReportLab and machine-readable JSON exports (`/api/banking/report/export`).
+- **Cryptographic Upgrade Sequencing**: Produces deterministic phase-by-phase migration roadmaps (P0 Immediate to P3 Long-Term) aligned with CNSA 2.0 and NIST FIPS standards.
+- **Air-Gapped Reliability**: Report generation functions completely offline without external network or font asset dependencies.
+
+### 16.3 TLS Scanner Security Hardening
+- **HTTP Redirect Refusal**: Raw TCP socket connection strictly terminates without following HTTP 301/302 redirects, neutralizing open redirect SSRF attacks.
+- **DNS Rebinding Prevention**: Hostname resolution occurs exactly once. TCP connects directly to the validated IP literal while preserving SNI for TLS handshake verification.
+- **Strict Network Filtering**: Scans against RFC 1918 private subnets, loopback, link-local / cloud metadata (`169.254.169.254`), multicast, and IPv6 unique local/link-local addresses are rejected prior to socket creation.
+
+---
+
+## 17. Maintainability, Logging & CI/CD Pipelines (Phase G)
+
+Phase G implements production maintainability, centralized environment configuration, structured observability, and continuous integration quality gates:
+
+### 17.1 Centralized Typed Configuration (`app.config`)
+- **Pydantic v2 Models**: Hierarchical configuration organized into `ServerConfig`, `SecurityConfig`, `RateLimitConfig`, and `AuditConfig`.
+- **Environment Hydration**: Populated from environment variables via `AppConfig.from_env()`.
+- **Secret Protection**: Sensitive fields (`api_key`, `audit_signing_key`) have `repr=False` to prevent unintentional exposure in logs, dumps, or debugger traces.
+- **Startup Validation**: `validate_startup()` performs programmatic checks (e.g., forbidding wildcard CORS or default development keys when `ENVIRONMENT=production`).
+
+### 17.2 Structured Logging & Request Correlation
+- **Request Correlation (`X-Request-ID`)**: `RequestCorrelationIdMiddleware` assigns or propagates a unique correlation ID per request, sets an `asyncio` context variable, and emits the `X-Request-ID` response header.
+- **Context-Aware Log Records**: `CorrelationIdLogFilter` injects `%(request_id)s` into every Python logging record for end-to-end request tracing.
+- **Credential Scrubbing**: `sanitize_log_dict()` recursively redacts API keys, tokens, and password fields prior to serialization.
+
+### 17.3 Automated CI/CD Pipelines
+- **Backend Workflow (`.github/workflows/backend-ci.yml`)**:
+  - Triggers on push and pull requests targeting `main` and `janya`.
+  - Enforces `contents: read` minimal permissions and concurrency cancellation.
+  - Installs dependencies from lockfile / requirements.
+  - Executes full backend test suite (`pytest backend/tests`).
+  - Runs supply chain vulnerability scan (`pip-audit -r backend/requirements.lock`).
+- **Frontend Workflow (`.github/workflows/frontend-ci.yml`)**:
+  - Triggers on push and pull requests targeting `main` and `janya`.
+  - Sets up Node.js 22 with npm cache.
+  - Executes `npm ci`, `npx tsc --noEmit`, `npx oxlint`, `npm test`, and `npm run build`.
+  - Runs security audit (`npm audit --audit-level=high`).
+
+### 17.4 Supply Chain & Dependency Reliability
+- **Backend**: Deterministic dependency locking via `backend/requirements.lock` generated with `--generate-hashes`.
+- **Frontend**: Clean locked dependencies via `frontend/package-lock.json`.
+- **Vulnerability Status**: Local execution of `pip-audit` and `npm audit` confirms 0 known vulnerabilities.
+
+---
+
+## 18. Operational Architecture & Known Deployment Boundaries
+
+To ensure complete architectural clarity, QuantumShield documents the following operational boundaries:
+
+### 18.1 Phase C External Checkpoint Ledger Anchoring
+- **Local Verification vs External Anchor**: The internal SHA-256 hash-chained audit ledger operates autonomously and verifies locally without external dependencies (`LOCALLY_VERIFIED`).
+- **Operational Requirement (`QS_EXTERNAL_CHECKPOINT_URL`)**: External cryptographic anchoring requires deploying and configuring a live external RFC 3161 or trusted timestamping service via `QS_EXTERNAL_CHECKPOINT_URL`.
+- **Fail-Closed Semantics**: When `QS_REQUIRE_EXTERNAL_CHECKPOINT=true` and no external checkpoint service is reachable, the ledger verification fails closed with status `EXTERNAL_ANCHOR_UNAVAILABLE`.
+
+### 18.2 Phase D4 AI Budget Tracker Multi-Worker Boundary
+- **Process-Local Singleton**: `AIBudgetTracker` enforces token and cost limits using an in-memory thread-safe singleton.
+- **Multi-Worker Note**: In horizontally scaled multi-process deployments (e.g., multiple Uvicorn workers or container replicas), each process maintains its own independent in-memory counter. Production multi-worker deployments should configure a distributed backing store (such as Redis) to coordinate global budget enforcement.
+
+### 18.3 Phase F Direct IP Connection & Redirect Defense Architecture
+- **Raw Socket Architecture**: Network inspections use Python `socket.socket` and `ssl.wrap_socket`.
+- **Redirect Refusal**: The scanner does not execute an HTTP client engine (such as `requests` or `urllib`) for network perimeter discovery, ensuring zero risk of HTTP redirect chaining into internal networks.

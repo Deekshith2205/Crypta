@@ -1,0 +1,60 @@
+name: Frontend CI
+
+on:
+  push:
+    branches:
+      - main
+      - janya
+  pull_request:
+    branches:
+      - main
+      - janya
+  workflow_dispatch:
+
+concurrency:
+  group: frontend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  frontend-lint-test-build:
+    name: Frontend Quality, Lint, Test & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck TypeScript
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Lint with oxlint
+        working-directory: frontend
+        run: npx oxlint
+
+      - name: Run frontend unit tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Build production bundle
+        working-directory: frontend
+        run: npm run build
+
+      - name: Supply-chain dependency audit
+        working-directory: frontend
+        run: npm audit --audit-level=high
