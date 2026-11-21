@@ -51,6 +51,10 @@ class FindingExplanationResponse(BaseModel):
     migration_considerations: str = Field(..., description="Migration roadmap and dependency considerations")
     standards_guidance: str = Field(..., description="Applicable NIST FIPS 203/204/205 or NSA CNSA 2.0 guidance")
     advisory_disclaimer: str = Field(default=DEFAULT_ADVISORY_DISCLAIMER)
+    evidence_hash: Optional[str] = Field(default=None, description="SHA-256 canonical hash of input evidence")
+    evidence_status: Optional[str] = Field(default=None, description="Echoed verified evidence status")
+    generated_at: Optional[str] = Field(default=None, description="UTC ISO timestamp of explanation generation")
+    provenance_verified: Optional[bool] = Field(default=None, description="Whether explanation was verified against canonical evidence hash")
 
 
 class BankingRiskExplanationRequest(BaseModel):
@@ -82,6 +86,10 @@ class BankingRiskExplanationResponse(BaseModel):
     supporting_evidence: List[str] = Field(..., description="Verified evidence supporting the risk posture")
     evidence_gaps_needed: List[str] = Field(..., description="Internal evidence still required to close observability gaps")
     advisory_disclaimer: str = Field(default=DEFAULT_ADVISORY_DISCLAIMER)
+    evidence_hash: Optional[str] = Field(default=None, description="SHA-256 canonical hash of input evidence")
+    evidence_status: Optional[str] = Field(default=None, description="Echoed verified evidence status")
+    generated_at: Optional[str] = Field(default=None, description="UTC ISO timestamp of explanation generation")
+    provenance_verified: Optional[bool] = Field(default=None, description="Whether explanation was verified against canonical evidence hash")
 
 
 class MigrationAdvisoryRequest(BaseModel):
@@ -111,6 +119,10 @@ class MigrationAdvisoryResponse(BaseModel):
     suggested_migration_phases: List[str] = Field(..., description="Sequenced migration milestones")
     pre_deployment_validation_steps: List[str] = Field(..., description="Verification and audit checks before production")
     advisory_disclaimer: str = Field(default=DEFAULT_ADVISORY_DISCLAIMER)
+    evidence_hash: Optional[str] = Field(default=None, description="SHA-256 canonical hash of input evidence")
+    evidence_status: Optional[str] = Field(default=None, description="Echoed verified evidence status")
+    generated_at: Optional[str] = Field(default=None, description="UTC ISO timestamp of explanation generation")
+    provenance_verified: Optional[bool] = Field(default=None, description="Whether explanation was verified against canonical evidence hash")
 
 
 class ReportExplanationRequest(BaseModel):
@@ -134,6 +146,10 @@ class ReportExplanationResponse(BaseModel):
         description="Keys: prioritization_rationale, migration_planning, governance_and_validation"
     )
     advisory_disclaimer: str = Field(default=DEFAULT_ADVISORY_DISCLAIMER)
+    evidence_hash: Optional[str] = Field(default=None, description="SHA-256 canonical hash of input evidence")
+    evidence_status: Optional[str] = Field(default=None, description="Echoed verified evidence status")
+    generated_at: Optional[str] = Field(default=None, description="UTC ISO timestamp of explanation generation")
+    provenance_verified: Optional[bool] = Field(default=None, description="Whether explanation was verified against canonical evidence hash")
 
 
 class AIExplanationResult(BaseModel, Generic[T]):
@@ -144,4 +160,5 @@ class AIExplanationResult(BaseModel, Generic[T]):
     data: Optional[T] = Field(default=None, description="Structured explanation response payload")
     error: Optional[str] = Field(default=None, description="Error message if generation failed or unavailable")
     disclaimer: str = Field(default=DEFAULT_ADVISORY_DISCLAIMER)
+    evidence_hash: Optional[str] = Field(default=None, description="SHA-256 hash of input evidence")
 

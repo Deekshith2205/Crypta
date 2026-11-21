@@ -37,6 +37,9 @@ class AIBudgetTracker:
             os.environ.get("QS_AI_ESTIMATED_COST_PER_1K_TOKENS", "0.002")
         )
 
+        self._default_token_budget = self._daily_token_budget
+        self._default_cost_budget_usd = self._daily_cost_budget_usd
+
         self._current_date = self._get_current_utc_date()
         self._tokens_used_today = 0
         self._cost_used_today_usd = 0.0
@@ -133,11 +136,13 @@ class AIBudgetTracker:
                 self._daily_cost_budget_usd = cost_budget_usd
 
     def reset(self) -> None:
-        """Clears all consumption metrics for testing."""
+        """Clears all consumption metrics and restores default limits for testing."""
         with self._lock:
             self._current_date = self._get_current_utc_date()
             self._tokens_used_today = 0
             self._cost_used_today_usd = 0.0
+            self._daily_token_budget = self._default_token_budget
+            self._daily_cost_budget_usd = self._default_cost_budget_usd
 
 
 # Global singleton instance

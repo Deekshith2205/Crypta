@@ -33,6 +33,7 @@ from app.ai.sanitization import sanitize_dict_fields, sanitize_text
 from app.ai.validation import validate_ai_explanation
 from app.ai.fallback import DeterministicExplanationService
 from app.ai.budget import AI_BUDGET_TRACKER
+from app.ai.provenance import bind_provenance_metadata, compute_evidence_hash
 from app.ai.schemas import (
     AIStatusResponse,
     AIExplanationResult,
@@ -275,6 +276,14 @@ class QuantumReadinessAIService:
                     DEFAULT_ADVISORY_DISCLAIMER,
                 )
 
+            ev_hash = None
+            if input_data is not None:
+                bind_provenance_metadata(
+                    output=parsed_data,
+                    input_data=input_data,
+                )
+                ev_hash = compute_evidence_hash(input_data)
+
             return AIExplanationResult[M](
                 success=True,
                 is_available=True,
@@ -282,6 +291,7 @@ class QuantumReadinessAIService:
                 data=parsed_data,
                 error=None,
                 disclaimer=DEFAULT_ADVISORY_DISCLAIMER,
+                evidence_hash=ev_hash,
             )
 
         except AIProviderUnavailableError:

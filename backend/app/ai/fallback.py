@@ -23,6 +23,7 @@ from app.ai.schemas import (
     AIExplanationResult,
     DEFAULT_ADVISORY_DISCLAIMER,
 )
+from app.ai.provenance import bind_provenance_metadata, compute_evidence_hash
 
 FALLBACK_PROVIDER_NAME = "DETERMINISTIC_FALLBACK"
 
@@ -144,6 +145,9 @@ class DeterministicExplanationService:
             advisory_disclaimer=DEFAULT_ADVISORY_DISCLAIMER,
         )
 
+        bind_provenance_metadata(data, request, evidence_status=request.evidence_status)
+        ev_hash = compute_evidence_hash(request)
+
         return AIExplanationResult[FindingExplanationResponse](
             success=True,
             is_available=True,
@@ -151,6 +155,7 @@ class DeterministicExplanationService:
             data=data,
             error=None,
             disclaimer=DEFAULT_ADVISORY_DISCLAIMER,
+            evidence_hash=ev_hash,
         )
 
     @staticmethod
@@ -211,6 +216,9 @@ class DeterministicExplanationService:
             advisory_disclaimer=DEFAULT_ADVISORY_DISCLAIMER,
         )
 
+        bind_provenance_metadata(data, request)
+        ev_hash = compute_evidence_hash(request)
+
         return AIExplanationResult[BankingRiskExplanationResponse](
             success=True,
             is_available=True,
@@ -218,6 +226,7 @@ class DeterministicExplanationService:
             data=data,
             error=None,
             disclaimer=DEFAULT_ADVISORY_DISCLAIMER,
+            evidence_hash=ev_hash,
         )
 
     @staticmethod
@@ -284,6 +293,9 @@ class DeterministicExplanationService:
             advisory_disclaimer=DEFAULT_ADVISORY_DISCLAIMER,
         )
 
+        bind_provenance_metadata(data, request)
+        ev_hash = compute_evidence_hash(request)
+
         return AIExplanationResult[MigrationAdvisoryResponse](
             success=True,
             is_available=True,
@@ -291,6 +303,7 @@ class DeterministicExplanationService:
             data=data,
             error=None,
             disclaimer=DEFAULT_ADVISORY_DISCLAIMER,
+            evidence_hash=ev_hash,
         )
 
     @staticmethod
@@ -321,6 +334,10 @@ class DeterministicExplanationService:
             advisory_disclaimer=DEFAULT_ADVISORY_DISCLAIMER,
         )
 
+        input_evidence = {"system_id": system_id}
+        bind_provenance_metadata(data, input_evidence)
+        ev_hash = compute_evidence_hash(input_evidence)
+
         return AIExplanationResult[ReportExplanationResponse](
             success=True,
             is_available=True,
@@ -328,4 +345,5 @@ class DeterministicExplanationService:
             data=data,
             error=None,
             disclaimer=DEFAULT_ADVISORY_DISCLAIMER,
+            evidence_hash=ev_hash,
         )
