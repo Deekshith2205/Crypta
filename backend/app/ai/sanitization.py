@@ -81,7 +81,7 @@ DELIMITER_BREAKOUT_PATTERNS = [
 # Multilingual and multi-variant prompt injection patterns
 PROMPT_INJECTION_PATTERNS = [
     # English
-    re.compile(r"(?i)\b(?:ignore|disregard|forget|bypass)\s+(?:all\s+)?(?:previous|prior|above|system|preceding)\s+(?:instructions|directions|prompts|rules|commands)\b"),
+    re.compile(r"(?i)\b(?:ignore|disregard|forget|bypass)\s+(?:all\s+)?(?:(?:previous|prior|above|system|preceding)\s+)?(?:instructions|directions|prompts|rules|commands)\b"),
     re.compile(r"(?i)\bdisregard\s+all\s+previous\s+directions\b"),
     re.compile(r"(?i)\b(?:reveal|repeat|output|show|print)\s+(?:all\s+)?(?:the\s+(?:above\s+|system\s+)?|your\s+|system\s+)?(?:prompt|instructions|config|configuration|rules)(?:\s+verbatim)?\b"),
     re.compile(r"(?i)\b(?:you\s+are\s+now|act\s+as)\s+(?:in\s+developer\s+mode|an?\s+unrestricted|DAN|a\s+different|an\s+evil|acting\s+as)\b"),
@@ -265,6 +265,24 @@ def sanitize_dict_fields(
 ) -> Dict[str, Any]:
     """Recursively sanitizes all string fields, including arbitrarily nested lists."""
     return _sanitize_value(data, max_field_length)
+
+
+def contains_prompt_injection(text: Optional[str]) -> bool:
+    """Returns True if the text matches any prompt injection patterns after NFKC normalization."""
+    if not text:
+        return False
+    normalized = unicodedata.normalize("NFKC", str(text))
+    return any(p.search(normalized) for p in PROMPT_INJECTION_PATTERNS)
+
+
+def redact_sensitive_patterns(text: Optional[str]) -> str:
+    """Redacts known sensitive secrets and patterns."""
+    if not text:
+        return ""
+    content = text
+    for pattern, replacement in REDACTION_PATTERNS:
+        content = pattern.sub(replacement, content)
+    return redact_high_entropy_secrets(content)
 
 
 # Alias for explicit request payload sanitization

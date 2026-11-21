@@ -53,6 +53,17 @@ SEVERITY_OVERRIDE_PATTERNS = [
     re.compile(r"(?i)\bmark\s+(?:this\s+as\s+)?([A-Z]+)\s+severity\b"),
 ]
 
+# Patterns claiming score or band override
+SCORE_OVERRIDE_PATTERNS = [
+    re.compile(r"(?i)\b(?:recalculate|recalculated|change|set|override)\s+(?:the\s+)?(?:priority\s+)?score\s+(?:to|as)\s+(\d{1,3})\b"),
+    re.compile(r"(?i)\b(?:priority\s+)?score\s+(?:is|should\s+be)\s+(\d{1,3})/100\b"),
+]
+
+BAND_OVERRIDE_PATTERNS = [
+    re.compile(r"(?i)\b(?:override|change|set|upgrade)\s+(?:the\s+)?priority\s+band\s+(?:to|as)\s+(P[0-3])\b"),
+    re.compile(r"(?i)\b(?:priority\s+band|upgrade\s+band)\s+(?:is|should\s+be)\s+(P[0-3])\b"),
+]
+
 # Patterns for fabricated financial costs
 FABRICATED_COST_PATTERN = re.compile(
     r"\$\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?\s*(?:million|billion|thousand|k|m)?\b",
@@ -150,6 +161,35 @@ def validate_ai_explanation(
                             f"(deterministic engine established {expected_severity})."
                         )
                         break
+
+    expected_score = context.get("priority_score")
+    if expected_score is not None:
+        for pat in SCORE_OVERRIDE_PATTERNS:
+            match = pat.search(full_text)
+            if match:
+                try:
+                    claimed_score = int(match.group(1))
+                    if claimed_score != int(expected_score):
+                        violations.append(
+                            f"AI explanation attempted to override priority score to {claimed_score} "
+                            f"(deterministic engine established {expected_score})."
+                        )
+                        break
+                except ValueError:
+                    pass
+
+    expected_band = str(context.get("priority_band", "")).upper()
+    if expected_band:
+        for pat in BAND_OVERRIDE_PATTERNS:
+            match = pat.search(full_text)
+            if match:
+                claimed_band = match.group(1).upper()
+                if claimed_band != expected_band:
+                    violations.append(
+                        f"AI explanation attempted to override priority band to {claimed_band} "
+                        f"(deterministic engine established {expected_band})."
+                    )
+                    break
 
     # 5. Financial Cost Fabrications
     # If the context is a migration advisory, verify no speculative dollar estimates
