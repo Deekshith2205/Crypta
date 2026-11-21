@@ -542,6 +542,43 @@ def is_known_algorithm(val_or_name: Optional[str]) -> bool:
     return False
 
 
+def resolve_quantum_migration_recommendation(
+    role: Optional[str] = None,
+    control: Optional[str] = None,
+    algorithm: Optional[str] = None,
+    current_recommendation: Optional[str] = None,
+) -> str:
+    """Returns a strictly role-aware post-quantum migration recommendation.
+
+    Key Establishment / Key Exchange -> NIST FIPS 203 (ML-KEM / Kyber) or Hybrid
+    Digital Signature / Certificate Authentication -> NIST FIPS 204 (ML-DSA) or FIPS 205 (SLH-DSA)
+    Symmetric Ciphers -> AES-256-GCM (Grover quadratic resistance)
+    Hashes / Integrity -> SHA-256 / SHA-384
+    """
+    ctx = f"{role or ''} {control or ''} {algorithm or ''}".upper()
+
+    # 1. Digital Signatures / Certificates / Identity Authentication
+    if any(k in ctx for k in ["SIGNATURE", "CERTIFICATE", "LEAF CERT", "AUTH", "DIGITAL_SIGNATURE", "CERTIFICATE_AUTHENTICATION"]):
+        return "Transition to NIST FIPS 204 (ML-DSA / Dilithium) or NIST FIPS 205 (SLH-DSA) post-quantum digital signatures."
+
+    # 2. Key Establishment / Key Exchange / Key Encapsulation / Key Wrapping
+    if any(k in ctx for k in ["EXCHANGE", "KEX", "SESSION KEY", "WRAPPING", "ESTABLISHMENT", "KEY_EXCHANGE", "KEY_WRAPPING", "DIFFIE", "DH"]):
+        return "Transition to NIST FIPS 203 (ML-KEM / Kyber) or hybrid post-quantum key exchange (X25519 + ML-KEM-768)."
+
+    # 3. Symmetric Ciphers / Bulk Data Encryption
+    if any(k in ctx for k in ["AES-128", "AES128", "SYMMETRIC", "BULK_ENCRYPTION", "DATA_ENCRYPTION"]):
+        return "Upgrade symmetric encryption keys to AES-256-GCM to achieve ~128-bit quantum security margin under Grover's algorithm."
+
+    # 4. Hash Functions / Message Digests
+    if any(k in ctx for k in ["HASH", "MD5", "SHA-1", "SHA1", "DIGEST", "HASH_FUNCTION"]):
+        return "Replace legacy hash function with SHA-256 or SHA-384 for quantum collision resistance."
+
+    if current_recommendation and "ML-KEM / ML-DSA" not in current_recommendation:
+        return current_recommendation
+
+    return "Transition to approved NIST Post-Quantum Cryptographic Standards."
+
+
 def classify_risk_domain(
     algorithm: Optional[str] = None,
     threat_vector: Optional[str] = None,

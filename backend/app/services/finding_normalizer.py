@@ -7,7 +7,12 @@ Enforces strict evidence semantics: NOT_OBSERVABLE != VULNERABLE.
 from typing import List, Dict, Any, Optional
 from app.models.findings import NormalizedFinding
 from app.models.banking import BankingAsset, EvidenceItem
-from app.security.crypto_catalog import classify_risk_domain, parse_dh_parameter, is_known_algorithm
+from app.security.crypto_catalog import (
+    classify_risk_domain,
+    parse_dh_parameter,
+    is_known_algorithm,
+    resolve_quantum_migration_recommendation,
+)
 
 
 def is_empty_or_placeholder(val: Any) -> bool:
@@ -79,7 +84,13 @@ def normalize_tls_finding(finding: Any, system_id: Optional[str] = None) -> Norm
             default=default_risk,
         )
         msg = getattr(finding, "security_impact", getattr(finding, "reason", getattr(finding, "message", title)))
-        rec = getattr(finding, "recommendation", "Upgrade to post-quantum cryptographic standards.")
+        raw_rec = getattr(finding, "recommendation", None)
+        if raw_rec and raw_rec != "Upgrade to post-quantum cryptographic standards.":
+            rec = raw_rec
+        elif risk == "QUANTUM":
+            rec = resolve_quantum_migration_recommendation(role=role, control=title, algorithm=val)
+        else:
+            rec = "Maintain classical cryptographic standards."
 
     # Invariant: If evidence is NOT_OBSERVABLE, severity must not be CRITICAL/HIGH vulnerability
     if str(ev).upper() == "NOT_OBSERVABLE":
@@ -248,7 +259,13 @@ def normalize_config_finding(finding: Any, system_id: Optional[str] = None) -> N
                 default="CLASSICAL",
             )
             msg = getattr(finding, "description", getattr(finding, "message", f"{title}: {val}"))
-            rec = getattr(finding, "recommendation", "Review and align configuration with banking standards.")
+            raw_rec = getattr(finding, "recommendation", None)
+            if raw_rec and raw_rec != "Review and align configuration with banking standards.":
+                rec = raw_rec
+            elif risk == "QUANTUM":
+                rec = resolve_quantum_migration_recommendation(role=role, control=title, algorithm=str(algo_candidate))
+            else:
+                rec = "Review and align configuration with banking standards."
 
     # Invariant: If not observable, not vulnerable
     if ev.upper() == "NOT_OBSERVABLE":
@@ -321,11 +338,11 @@ def normalize_profile_evidence_item(item: EvidenceItem, system_id: Optional[str]
                 elif any(g in val_upper for g in ["AES-128", "AES128"]):
                     sev = "HIGH"
                     msg = f"{item.control} operates with 128-bit symmetric key ({item.value}) vulnerable to Grover's algorithm quadratic search."
-                    rec = "Upgrade symmetric encryption keys to AES-256-GCM."
+                    rec = "Upgrade symmetric encryption keys to AES-256-GCM to defend against Grover's algorithm."
                 else:
                     sev = "HIGH" if ("RSA-2048" in val_upper or "ECDH" in val_upper) else "MEDIUM"
                     msg = f"{item.control} operates with classical asymmetric algorithm ({item.value}) vulnerable to Shor's algorithm."
-                    rec = "Transition to NIST Post-Quantum Cryptographic Standards (ML-KEM / ML-DSA)."
+                    rec = resolve_quantum_migration_recommendation(role=item.control, control=item.control, algorithm=item.value)
             elif any(c in val_upper for c in ["3DES", "DES", "MD5", "SHA-1", "TLSV1.0", "TLSV1.1"]):
                 sev = "CRITICAL" if "3DES" in val_upper else "HIGH"
                 msg = f"{item.control} configured with deprecated classical cryptographic primitive ({item.value})."
