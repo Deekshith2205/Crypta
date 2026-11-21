@@ -23,6 +23,7 @@ import type {
   ReportExplanationRequest,
   ReportExplanationResponse,
   AIBudgetTelemetry,
+  CBOMDocument,
 } from '../types/scan.ts';
 import { validateUploadFiles } from './domainValidation.ts';
 
@@ -311,6 +312,16 @@ export async function getBankingSystemPdfReport(
     `/api/banking/systems/${encodeURIComponent(systemId)}/report/pdf?include_ai=true`,
     { method: 'GET' },
     'Unable to connect to the PDF report service.'
+  );
+}
+
+export async function getBankingSystemCBOM(
+  systemId: string
+): Promise<CBOMDocument> {
+  return fetchWithFallback<CBOMDocument>(
+    `/api/banking/systems/${encodeURIComponent(systemId)}/cbom`,
+    { method: 'GET' },
+    'Unable to connect to the CBOM service.'
   );
 }
 

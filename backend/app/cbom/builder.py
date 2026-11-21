@@ -188,12 +188,28 @@ class CBOMBuilder:
         crypto_props = self._build_crypto_properties(asset)
 
         # Custom provenance properties
+        evidence_status_val = (
+            asset.evidence_status.value
+            if hasattr(asset.evidence_status, "value")
+            else str(asset.evidence_status)
+        )
+        role_val = (
+            asset.role.value
+            if hasattr(asset.role, "value")
+            else str(asset.role)
+        )
+        agility_val = (
+            asset.crypto_agility.value
+            if hasattr(asset.crypto_agility, "value")
+            else str(asset.crypto_agility)
+        )
+
         properties = [
             CBOMProperty(name="quantumshield:source_file", value=asset.source_file),
             CBOMProperty(name="quantumshield:config_path", value=asset.source_path),
-            CBOMProperty(name="quantumshield:evidence_status", value=asset.evidence_status.value),
-            CBOMProperty(name="quantumshield:role", value=asset.role),
-            CBOMProperty(name="quantumshield:crypto_agility", value=asset.crypto_agility.value),
+            CBOMProperty(name="quantumshield:evidence_status", value=evidence_status_val),
+            CBOMProperty(name="quantumshield:role", value=role_val),
+            CBOMProperty(name="quantumshield:crypto_agility", value=agility_val),
         ]
         if asset.source_line is not None:
             properties.append(CBOMProperty(name="quantumshield:source_line", value=str(asset.source_line)))

@@ -882,3 +882,64 @@ export type AIBudgetTelemetry = {
   current_date?: string;
   reset_at?: string;
 };
+
+// ==============================================================================
+// PHASE F: CYCLONEDX 1.7 CBOM (CRYPTOGRAPHIC BILL OF MATERIALS) TYPES
+// ==============================================================================
+
+export type CBOMProperty = {
+  name: string;
+  value: string;
+};
+
+export type CBOMAlgorithmProperties = {
+  primitive?: string;
+  parameterSetIdentifier?: string;
+  curve?: string;
+  executionEnvironment?: string;
+  implementationPlatform?: string;
+  certificationLevel?: string;
+  mode?: string;
+  padding?: string;
+  cryptoFunctions?: string[];
+  classicalSecurityLevel?: number;
+  nistQuantumSecurityLevel?: number;
+};
+
+export type CBOMCryptoProperties = {
+  assetType: 'algorithm' | 'certificate' | 'protocol' | 'related-crypto-material' | string;
+  algorithmProperties?: CBOMAlgorithmProperties;
+  certificateProperties?: Record<string, unknown>;
+  protocolProperties?: Record<string, unknown>;
+  relatedCryptoMaterialProperties?: Record<string, unknown>;
+  oid?: string;
+};
+
+export type CBOMComponent = {
+  type: string;
+  'bom-ref': string;
+  name: string;
+  description?: string;
+  cryptoProperties: CBOMCryptoProperties;
+  properties?: CBOMProperty[];
+};
+
+export type CBOMDependency = {
+  ref: string;
+  dependsOn: string[];
+};
+
+export type CBOMDocument = {
+  bomFormat: string;
+  specVersion: string;
+  serialNumber: string;
+  version: number;
+  metadata?: {
+    timestamp: string;
+    tools?: Array<{ vendor?: string; name?: string; version?: string }>;
+    component?: Record<string, unknown>;
+    properties?: CBOMProperty[];
+  };
+  components: CBOMComponent[];
+  dependencies?: CBOMDependency[];
+};

@@ -5,11 +5,13 @@ import type {
   EvidenceGap,
   BankingRiskAssessment,
   AuditVerificationResult,
+  CBOMDocument,
 } from '../types/scan';
 
 import {
   getBankingSystemJsonReport,
   getBankingSystemPdfReport,
+  getBankingSystemCBOM,
   verifyAuditRecord,
 } from '../services/api';
 
@@ -29,9 +31,11 @@ import {
   FileText,
   ShieldCheck,
   Sparkles,
+  Layers,
 } from 'lucide-react';
 
 import { AIBankingRiskModal } from './ai/AIBankingRiskModal';
+import { CBOMModal } from './CBOMModal';
 
 interface BankingSystemCardProps {
   profile: BankingAsset;
@@ -55,7 +59,7 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
   const [expanded, setExpanded] = useState<boolean>(isDetailedView);
 
   const [reportBusy, setReportBusy] = useState<
-    'json' | 'pdf' | 'audit' | null
+    'json' | 'pdf' | 'audit' | 'cbom' | null
   >(null);
 
   const [auditResult, setAuditResult] =
@@ -65,6 +69,8 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
     useState<string | null>(null);
 
   const [aiModalOpen, setAiModalOpen] = useState<boolean>(false);
+  const [cbomModalOpen, setCbomModalOpen] = useState<boolean>(false);
+  const [cbomData, setCbomData] = useState<CBOMDocument | null>(null);
 
   // ==========================================================================
   // BADGE HELPERS
@@ -241,6 +247,29 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
   };
 
   // ==========================================================================
+  // TASK F8: CYCLONEDX 1.7 CBOM RETRIEVAL & MODAL
+  // ==========================================================================
+
+  const handleOpenCBOM = async () => {
+    setReportBusy('cbom');
+    setReportActionError(null);
+
+    try {
+      const cbom = await getBankingSystemCBOM(profile.id);
+      setCbomData(cbom);
+      setCbomModalOpen(true);
+    } catch (error) {
+      setReportActionError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to retrieve CBOM document.'
+      );
+    } finally {
+      setReportBusy(null);
+    }
+  };
+
+  // ==========================================================================
   // COMPONENT RENDER
   // ==========================================================================
 
@@ -345,6 +374,19 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
                 <span>AI Reasoning</span>
               </button>
             )}
+
+            {/* Task F8: CycloneDX 1.7 CBOM Modal */}
+            <button
+              onClick={handleOpenCBOM}
+              disabled={reportBusy !== null}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 hover:border-[#5755D9] hover:text-[#5755D9] text-xs font-semibold transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              title="View and download CycloneDX 1.7 Cryptographic Bill of Materials"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>
+                {reportBusy === 'cbom' ? 'Loading...' : 'CBOM'}
+              </span>
+            </button>
 
             {/* Task 5: JSON Report Download */}
             <button
@@ -1086,6 +1128,15 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
         onClose={() => setAiModalOpen(false)}
         profile={profile}
         risk={risk}
+      />
+
+      {/* Task F8: CycloneDX 1.7 CBOM Modal */}
+      <CBOMModal
+        isOpen={cbomModalOpen}
+        onClose={() => setCbomModalOpen(false)}
+        cbom={cbomData}
+        systemName={profile.name}
+        systemId={profile.id}
       />
     </div>
   );

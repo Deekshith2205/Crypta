@@ -152,7 +152,8 @@ class TlsScanner:
         except ssl.SSLCertVerificationError as e:
             # Verification failed, but the server supports TLS!
             is_trusted = False
-            verification_status = f"Certificate verification failed: {e.verify_message}"
+            msg = getattr(e, "verify_message", str(e))
+            verification_status = f"Certificate verification failed: {msg}"
         except ssl.SSLError as e:
             # Check if this was a cert verification issue
             if "CERTIFICATE_VERIFY_FAILED" in str(e):
