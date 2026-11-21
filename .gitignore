@@ -20,6 +20,10 @@ ENV/
 .env
 .env.*
 !.env.example
+*.key
+*.db
+data/
+backend/data/
 
 # Frontend build & dependencies
 node_modules/
