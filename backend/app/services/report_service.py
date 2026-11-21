@@ -12,6 +12,8 @@ from xml.sax.saxutils import escape
 from app.models.banking import BankingAsset
 from app.models.profiles import get_synthetic_profile_by_id, get_synthetic_banking_profiles
 from app.models.report import CompleteAssessmentReport
+from app.models.risk import KeyChainStatus
+from app.models.zero_trust import build_zero_trust_assessment
 from app.services.banking_risk_engine import evaluate_banking_risk
 from app.services.migration_impact_engine import evaluate_migration_impact
 from app.services.upgrade_planner import (
@@ -255,7 +257,55 @@ def build_complete_json_report(
         ],
     }
 
-    # 15. Report Metadata
+    # 15. Zero Trust Architecture (NIST SP 800-207)
+    zero_trust_obj = build_zero_trust_assessment(
+        system_id,
+        tls_version=(profile.cryptography.tls_versions[0] if profile.cryptography and profile.cryptography.tls_versions else "TLSv1.3"),
+        asset=profile,
+    )
+    zero_trust_dict = {
+        "summary": zero_trust_obj.compute_zero_trust_summary(),
+        "controls": [c.model_dump() for c in zero_trust_obj.get_all_controls()],
+    }
+
+    # 16. Regulatory & Standards Compliance Mappings
+    compliance_mappings = {
+        "nist_sp_800_227": {
+            "standard": "NIST SP 800-227 (Recommendations for Cryptographic Key Management & Transition)",
+            "status": "COMPLIANT" if risk.key_protection.status == KeyChainStatus.QUANTUM_READY else "TRANSITION_REQUIRED",
+            "key_establishment": "FIPS 203 ML-KEM-768 or Hybrid X25519MLKEM768 required for quantum resistance",
+            "digital_signatures": "FIPS 204 ML-DSA-65 or FIPS 205 SLH-DSA required for post-quantum authentication",
+            "findings_count": len(quantum_findings),
+        },
+        "cnsa_2_0": {
+            "standard": "Commercial National Security Algorithm Suite 2.0 (CNSA 2.0)",
+            "status": "COMPLIANT" if (risk.key_protection.status == KeyChainStatus.QUANTUM_READY and "AES-256" in (chain.data_encryption if chain and chain.data_encryption else "")) else "NON_COMPLIANT",
+            "symmetric_encryption": "AES-256 (Grover-resilient 128-bit security)",
+            "asymmetric_kem": "ML-KEM-1024 or ML-KEM-768",
+            "asymmetric_signatures": "ML-DSA-87 or ML-DSA-65 or SLH-DSA",
+            "mandate_timeline": "Software/firmware migration required by 2030; legacy phased out by 2033",
+        },
+        "fips_203": {
+            "standard": "FIPS 203 (Module-Lattice-Based Key-Encapsulation Mechanism - ML-KEM)",
+            "target": "ML-KEM-768 / ML-KEM-1024",
+            "current_status": risk.key_protection.key_wrapping_status,
+            "migrated": "ML-KEM" in (chain.key_wrapping.upper() if chain and chain.key_wrapping else ""),
+        },
+        "fips_204": {
+            "standard": "FIPS 204 (Module-Lattice-Based Digital Signature Algorithm - ML-DSA)",
+            "target": "ML-DSA-65 / ML-DSA-87",
+            "current_status": risk.key_protection.authentication_status,
+            "migrated": "ML-DSA" in (chain.authentication.upper() if chain and chain.authentication else ""),
+        },
+        "fips_205": {
+            "standard": "FIPS 205 (Stateless Hash-Based Digital Signature Algorithm - SLH-DSA)",
+            "target": "SLH-DSA-128s / SLH-DSA-128f",
+            "alternative_signature": "Stateless hash signatures for root CA and offline code signing",
+            "migrated": "SLH-DSA" in (chain.authentication.upper() if chain and chain.authentication else ""),
+        },
+    }
+
+    # 17. Report Metadata
     report_id = f"QSR-{profile.id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     rep_meta = {
         "report_id": report_id,
@@ -263,11 +313,11 @@ def build_complete_json_report(
         "system_name": profile.name,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "engine_version": "QuantumShield v2.5.0-BankingEngine",
-        "spec_conformance": ["NIST SP 800-227", "RFC 8785", "CycloneDX 1.7"],
+        "spec_conformance": ["NIST SP 800-227", "RFC 8785", "CycloneDX 1.7", "CNSA 2.0", "FIPS 203", "FIPS 204", "FIPS 205"],
         "disclaimer": "QuantumShield audit analysis is for authorized financial risk evaluation.",
     }
 
-    # 16. Build preliminary dict for canonical hashing
+    # 18. Build preliminary dict for canonical hashing
     payload_for_seal = {
         "system": system_dict,
         "quantum_posture": quantum_posture,
@@ -280,7 +330,7 @@ def build_complete_json_report(
         "timestamp": rep_meta["timestamp"],
     }
 
-    # 17. Cryptographic sealing via AuditChainService
+    # 19. Cryptographic sealing via AuditChainService
     svc = audit_service or DEFAULT_AUDIT_CHAIN_SERVICE
     if seal_audit:
         audit_record = svc.create_audit_record(
@@ -321,6 +371,8 @@ def build_complete_json_report(
         what_if_results=what_if_dict,
         audit=audit_record,
         audit_metadata=audit_record,
+        zero_trust=zero_trust_dict,
+        compliance_mappings=compliance_mappings,
     )
 
 

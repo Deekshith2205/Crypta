@@ -53,6 +53,14 @@ class CompleteAssessmentReport(BaseModel):
     what_if_results: Optional[Dict[str, Any]] = Field(default=None, description="Alias for what_if")
     audit: AuditRecord = Field(..., description="Tamper-evident cryptographic audit hash record")
     audit_metadata: AuditRecord = Field(..., description="Alias for audit")
+    zero_trust: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="NIST SP 800-207 Zero Trust Architecture assessment metrics and controls"
+    )
+    compliance_mappings: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="NIST SP 800-227, CNSA 2.0, and FIPS 203/204/205 compliance mappings"
+    )
     ai_advisory: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Optional AI advisory report narrative (informational only; excluded from deterministic audit seal)"
