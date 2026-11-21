@@ -337,6 +337,7 @@ def build_complete_json_report(
             assessment_data=payload_for_seal,
             assessment_id=system_id,
             store=True,
+            auto_checkpoint=True,
         )
     else:
         existing = svc.get_latest_record_for_system(system_id) if hasattr(svc, "get_latest_record_for_system") else None

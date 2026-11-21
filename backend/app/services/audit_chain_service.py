@@ -6,11 +6,15 @@ Uses SHA-256 over RFC 8785 compliant canonical JSON representations.
 import hashlib
 import hmac
 import json
+import logging
+import os
 import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Union
 from app.models.audit_chain import AuditRecord, AuditVerificationResult, AuditVerificationStatus
+
+logger = logging.getLogger("quantumshield.audit")
 
 GENESIS_PREVIOUS_HASH: str = "0" * 64
 
@@ -130,12 +134,42 @@ class AuditChainService:
                 return rec
         return None
 
+    @property
+    def is_external_checkpoint_mandatory(self) -> bool:
+        """Returns True if QS_REQUIRE_EXTERNAL_CHECKPOINT is set in environment."""
+        val = os.environ.get("QS_REQUIRE_EXTERNAL_CHECKPOINT", "").strip().lower()
+        return val in ("1", "true", "yes", "mandatory", "required")
+
+    def _finalize_external_checkpoint_on_store(self, record: AuditRecord) -> Optional[TrustedCheckpoint]:
+        """
+        Finalizes external checkpoint anchoring after an audit record is committed to storage.
+        Ensures checkpoint corresponds to the actual persisted ledger state.
+        Handles mandatory vs optional policies safely.
+        """
+        is_mandatory = self.is_external_checkpoint_mandatory
+        provider = self._checkpoint_provider
+
+        if provider is None or not provider.is_configured():
+            if is_mandatory:
+                logger.error("Mandatory external audit checkpointing failed: provider is unconfigured.")
+                raise CheckpointError("Mandatory external audit checkpointing failed: provider is unconfigured.")
+            return None
+
+        try:
+            return self.create_external_checkpoint()
+        except Exception as exc:
+            logger.error("Failed to anchor external checkpoint after storing record %s: %s", record.record_id, exc)
+            if is_mandatory:
+                raise CheckpointError(f"Mandatory external audit checkpointing failed: {exc}") from exc
+            return None
+
     def create_audit_record(
         self,
         assessment_data: Any,
         assessment_id: str,
         previous_hash: Optional[str] = None,
         store: bool = True,
+        auto_checkpoint: Optional[bool] = None,
     ) -> AuditRecord:
         """
         Creates a new tamper-evident audit record:
@@ -144,7 +178,7 @@ class AuditChainService:
         3. current_hash = SHA256(canonical_json + previous_hash)
         4. signature = HMAC-SHA256(rec_id + assessment_id + a_hash + prev + c_hash + timestamp)
         Includes idempotency: if stored record for assessment_id already has matching assessment_hash, returns existing record.
-        Atomically links and commits to ledger when store=True.
+        Atomically links and commits to ledger when store=True, and anchors external checkpoint if configured.
         """
         with self._lock:
             canonical = canonicalize_json(assessment_data, strip_volatile=True)
@@ -181,6 +215,18 @@ class AuditChainService:
                     self._storage.append_record(record)
                 else:
                     self._in_memory_fallback.append(record)
+
+                from app.security.external_checkpoint import InMemoryExternalCheckpointProvider
+                should_auto_checkpoint = auto_checkpoint if auto_checkpoint is not None else (
+                    self.is_external_checkpoint_mandatory
+                    or (
+                        self._checkpoint_provider is not None
+                        and self._checkpoint_provider.is_configured()
+                        and not isinstance(self._checkpoint_provider, InMemoryExternalCheckpointProvider)
+                    )
+                )
+                if should_auto_checkpoint:
+                    self._finalize_external_checkpoint_on_store(record)
 
             return record
 
@@ -408,6 +454,7 @@ class AuditChainService:
         """
         Creates and stores an independently authenticated checkpoint of the current ledger head.
         Enforces monotonic sequence numbering for replay attack protection.
+        Prevents duplicate checkpoint creation when the same state is already anchored.
         """
         with self._lock:
             if self._checkpoint_provider is None or not self._checkpoint_provider.is_configured():
@@ -416,6 +463,16 @@ class AuditChainService:
             head_hash = self.get_latest_hash()
             count = len(records)
             prev_chk = self._checkpoint_provider.get_latest_checkpoint()
+
+            # Prevent duplicate checkpoint creation if already anchored at current ledger state
+            if prev_chk is not None:
+                if prev_chk.head_hash == head_hash and prev_chk.record_count == count:
+                    return prev_chk
+                if count < prev_chk.record_count:
+                    raise CheckpointError(
+                        f"Cannot anchor rollback: ledger record count {count} < latest checkpoint record count {prev_chk.record_count}"
+                    )
+
             seq = (prev_chk.sequence_number + 1) if prev_chk else 1
             now_ts = datetime.now(timezone.utc).isoformat()
 
@@ -437,6 +494,7 @@ class AuditChainService:
         2. Validates internal SQLite anchor checkpoints.
         3. Validates independently protected external checkpoints (detecting suffix truncation and rollback).
         """
+        require_external = require_external or self.is_external_checkpoint_mandatory
         try:
             records = self.get_ledger()
             if not records:

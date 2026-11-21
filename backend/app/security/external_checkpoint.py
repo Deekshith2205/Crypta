@@ -188,7 +188,8 @@ class SignedExternalHttpCheckpointProvider(BaseCheckpointProvider):
         timeout_seconds: float = 5.0,
     ):
         super().__init__(signing_key=signing_key)
-        self._endpoint_url = endpoint_url or os.environ.get("QS_EXTERNAL_CHECKPOINT_URL", "").strip()
+        raw_url = endpoint_url if endpoint_url is not None else os.environ.get("QS_EXTERNAL_CHECKPOINT_URL", "")
+        self._endpoint_url = raw_url.strip().rstrip("/") if raw_url else ""
         self._timeout = timeout_seconds
 
     def is_configured(self) -> bool:
@@ -229,6 +230,12 @@ class SignedExternalHttpCheckpointProvider(BaseCheckpointProvider):
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 return 200 <= resp.status < 300
+        except urllib.error.HTTPError as e:
+            logger.error("HTTP error posting external audit checkpoint to %s: HTTP %s", self._endpoint_url, e.code)
+            raise CheckpointError(f"External checkpoint storage failed with HTTP {e.code}: {e.reason}") from e
+        except urllib.error.URLError as e:
+            logger.error("Network error reaching external audit checkpoint at %s: %s", self._endpoint_url, e.reason)
+            raise CheckpointError(f"External checkpoint storage failed (network error): {e.reason}") from e
         except Exception as e:
             logger.error("Failed to post external audit checkpoint to %s: %s", self._endpoint_url, e)
             raise CheckpointError(f"External checkpoint storage failed: {e}") from e
@@ -247,7 +254,10 @@ class SignedExternalHttpCheckpointProvider(BaseCheckpointProvider):
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 if resp.status == 404:
                     return None
-                data = json.loads(resp.read().decode("utf-8"))
+                raw_bytes = resp.read()
+                data = json.loads(raw_bytes.decode("utf-8"))
+                if not isinstance(data, dict):
+                    raise CheckpointError("Malformed response: expected JSON object from remote host.")
                 checkpoint = TrustedCheckpoint(**data)
                 if not self.verify_signature(checkpoint):
                     raise CheckpointError("External checkpoint signature verification failed from remote host.")
@@ -255,8 +265,12 @@ class SignedExternalHttpCheckpointProvider(BaseCheckpointProvider):
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return None
-            raise CheckpointError(f"Remote external checkpoint query failed: {e}") from e
+            raise CheckpointError(f"Remote external checkpoint query failed with HTTP {e.code}: {e.reason}") from e
+        except urllib.error.URLError as e:
+            raise CheckpointError(f"Unable to reach external checkpoint anchor (network error): {e.reason}") from e
         except Exception as e:
+            if isinstance(e, CheckpointError):
+                raise
             raise CheckpointError(f"Unable to reach external checkpoint anchor: {e}") from e
 
 
