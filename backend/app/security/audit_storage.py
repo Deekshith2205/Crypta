@@ -33,7 +33,7 @@ class AuditLedgerStorage:
         self._data_dir = Path(data_dir).resolve() if data_dir else get_default_data_dir()
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._db_path = self._data_dir / (db_filename or self.DB_FILENAME)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._conn: Optional[sqlite3.Connection] = None
         self._init_db()
 

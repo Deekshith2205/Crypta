@@ -6,6 +6,7 @@ Uses SHA-256 over RFC 8785 compliant canonical JSON representations.
 import hashlib
 import hmac
 import json
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Union
@@ -98,6 +99,7 @@ class AuditChainService:
         self._storage = storage
         self._key_manager = key_manager if key_manager is not None else DEFAULT_AUDIT_KEY_MANAGER
         self._in_memory_fallback: List[AuditRecord] = []
+        self._lock = threading.RLock()
 
     def get_latest_hash(self) -> str:
         """Returns the current_hash of the latest record or GENESIS_PREVIOUS_HASH."""
@@ -134,43 +136,45 @@ class AuditChainService:
         3. current_hash = SHA256(canonical_json + previous_hash)
         4. signature = HMAC-SHA256(rec_id + assessment_id + a_hash + prev + c_hash + timestamp)
         Includes idempotency: if stored record for assessment_id already has matching assessment_hash, returns existing record.
+        Atomically links and commits to ledger when store=True.
         """
-        canonical = canonicalize_json(assessment_data, strip_volatile=True)
-        a_hash = compute_sha256(canonical)
+        with self._lock:
+            canonical = canonicalize_json(assessment_data, strip_volatile=True)
+            a_hash = compute_sha256(canonical)
 
-        # Idempotency check: prevent duplicate records on retry of identical assessment
-        if store:
-            latest_existing = self.get_latest_record_for_system(assessment_id)
-            if latest_existing is not None and latest_existing.assessment_hash == a_hash:
-                return latest_existing
+            # Idempotency check: prevent duplicate records on retry of identical assessment
+            if store:
+                latest_existing = self.get_latest_record_for_system(assessment_id)
+                if latest_existing is not None and latest_existing.assessment_hash == a_hash:
+                    return latest_existing
 
-        prev = previous_hash if previous_hash is not None else self.get_latest_hash()
-        c_hash = compute_sha256(canonical + prev)
-        ts = datetime.now(timezone.utc).isoformat()
-        rec_id = str(uuid.uuid4())
+            prev = previous_hash if previous_hash is not None else self.get_latest_hash()
+            c_hash = compute_sha256(canonical + prev)
+            ts = datetime.now(timezone.utc).isoformat()
+            rec_id = str(uuid.uuid4())
 
-        sig_material = f"{rec_id}:{assessment_id}:{a_hash}:{prev}:{c_hash}:{ts}".encode("utf-8")
-        sig = self._key_manager.sign(sig_material)
+            sig_material = f"{rec_id}:{assessment_id}:{a_hash}:{prev}:{c_hash}:{ts}".encode("utf-8")
+            sig = self._key_manager.sign(sig_material)
 
-        record = AuditRecord(
-            record_id=rec_id,
-            assessment_id=assessment_id,
-            assessment_hash=a_hash,
-            previous_hash=prev,
-            current_hash=c_hash,
-            signature=sig,
-            timestamp=ts,
-            schema_version="1.0.0",
-            canonical_payload=canonical,
-        )
+            record = AuditRecord(
+                record_id=rec_id,
+                assessment_id=assessment_id,
+                assessment_hash=a_hash,
+                previous_hash=prev,
+                current_hash=c_hash,
+                signature=sig,
+                timestamp=ts,
+                schema_version="1.0.0",
+                canonical_payload=canonical,
+            )
 
-        if store:
-            if self._storage is not None:
-                self._storage.append_record(record)
-            else:
-                self._in_memory_fallback.append(record)
+            if store:
+                if self._storage is not None:
+                    self._storage.append_record(record)
+                else:
+                    self._in_memory_fallback.append(record)
 
-        return record
+            return record
 
     def verify_audit_record(
         self,
