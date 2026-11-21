@@ -16,6 +16,7 @@ class AuditRecord(BaseModel):
     previous_hash: str = Field(..., description="SHA-256 hash of previous audit record ('0'*64 for genesis)")
     current_hash: str = Field(..., description="SHA-256 hash of (canonical_assessment + previous_hash)")
     timestamp: str = Field(..., description="ISO 8601 generation timestamp")
+    signature: str = Field(default="", description="HMAC-SHA256 signature of the audit record")
     schema_version: str = Field(default="1.0.0", description="Audit schema version")
     canonical_payload: Optional[str] = Field(default=None, description="Canonical JSON string of assessment payload")
 
