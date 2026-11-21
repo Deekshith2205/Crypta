@@ -7,7 +7,7 @@ Enforces strict evidence semantics: NOT_OBSERVABLE != VULNERABLE.
 from typing import List, Dict, Any, Optional
 from app.models.findings import NormalizedFinding
 from app.models.banking import BankingAsset, EvidenceItem
-from app.security.crypto_catalog import classify_risk_domain
+from app.security.crypto_catalog import classify_risk_domain, parse_dh_parameter
 
 
 def sanitize_secret_value(val: str) -> str:
@@ -155,6 +155,23 @@ def normalize_config_finding(finding: Any, system_id: Optional[str] = None) -> N
     file_path = getattr(finding, "source_file", getattr(finding, "file", getattr(finding, "file_path", None)))
     line_no = getattr(finding, "source_line", getattr(finding, "line", None))
 
+    # Check for Diffie-Hellman parameter or algorithm
+    dh_info = parse_dh_parameter(val) or parse_dh_parameter(title)
+    if not dh_info and any(k in str(val).upper() or k in str(title).upper() for k in ("DIFFIE-HELLMAN", "DHPARAM", "DH-1024", "DH-2048", "DH1024")):
+        dh_info = parse_dh_parameter(f"{title} {val}")
+
+    if dh_info:
+        role = "Key Establishment"
+        sev = dh_info["severity"]
+        risk = "CLASSICAL" if dh_info["is_weak"] else "QUANTUM"
+        rec = dh_info["recommendation"]
+        msg = (
+            f"Diffie-Hellman key exchange ({dh_info['canonical_name']}) configured with "
+            f"{dh_info['key_size'] or 'unspecified'}-bit parameters. "
+            f"{'Insecure key size vulnerable to Logjam and discrete log precomputation; ' if dh_info['is_weak'] else ''}"
+            f"vulnerable to Shor's algorithm and Store Now, Decrypt Later (SNDL)."
+        )
+
     # Invariant: If not observable, not vulnerable
     if ev.upper() == "NOT_OBSERVABLE":
         sev = "INFORMATIONAL"
@@ -193,28 +210,41 @@ def normalize_profile_evidence_item(item: EvidenceItem, system_id: Optional[str]
     ev_status = "DECLARED" if src == "OPERATOR_DECLARED" else ("OBSERVED" if src == "CONFIGURATION_FILE" else obs)
 
     # Determine risk dimension
-    risk = classify_risk_domain(algorithm=item.value, title=item.control, default="CLASSICAL")
-    if risk == "QUANTUM":
-        if any(pqc in val_upper for pqc in ["ML-KEM", "ML-DSA", "X25519MLKEM", "AES-256", "CHACHA20", "SHA-384", "SHA-512"]):
-            sev = "INFORMATIONAL"
-            msg = f"{item.control} verified using quantum-resilient primitive ({item.value})."
-            rec = "Maintain periodic audit and certificate lifecycle."
-        elif any(g in val_upper for g in ["AES-128", "AES128"]):
-            sev = "HIGH"
-            msg = f"{item.control} operates with 128-bit symmetric key ({item.value}) vulnerable to Grover's algorithm quadratic search."
-            rec = "Upgrade symmetric encryption keys to AES-256-GCM."
-        else:
-            sev = "HIGH" if ("RSA-2048" in val_upper or "ECDH" in val_upper) else "MEDIUM"
-            msg = f"{item.control} operates with classical asymmetric algorithm ({item.value}) vulnerable to Shor's algorithm."
-            rec = "Transition to NIST Post-Quantum Cryptographic Standards (ML-KEM / ML-DSA)."
-    elif any(c in val_upper for c in ["3DES", "DES", "MD5", "SHA-1", "TLSV1.0", "TLSV1.1"]):
-        sev = "CRITICAL" if "3DES" in val_upper else "HIGH"
-        msg = f"{item.control} configured with deprecated classical cryptographic primitive ({item.value})."
-        rec = "Replace deprecated primitive with AES-256-GCM and SHA-256/384."
+    dh_info = parse_dh_parameter(item.value) or parse_dh_parameter(item.control)
+    if dh_info:
+        role = "Key Establishment"
+        sev = dh_info["severity"]
+        risk = "CLASSICAL" if dh_info["is_weak"] else "QUANTUM"
+        rec = dh_info["recommendation"]
+        msg = (
+            f"{item.control} operates with Diffie-Hellman key exchange ({dh_info['canonical_name']}) "
+            f"using {dh_info['key_size'] or 'unspecified'}-bit parameters. "
+            f"{'Insecure key size vulnerable to Logjam attack; ' if dh_info['is_weak'] else ''}"
+            f"vulnerable to Shor's algorithm and Store Now, Decrypt Later (SNDL)."
+        )
     else:
-        sev = "LOW"
-        msg = item.description or f"{item.control}: {item.value}"
-        rec = "Maintain standard operational monitoring."
+        risk = classify_risk_domain(algorithm=item.value, title=item.control, default="CLASSICAL")
+        if risk == "QUANTUM":
+            if any(pqc in val_upper for pqc in ["ML-KEM", "ML-DSA", "X25519MLKEM", "AES-256", "CHACHA20", "SHA-384", "SHA-512"]):
+                sev = "INFORMATIONAL"
+                msg = f"{item.control} verified using quantum-resilient primitive ({item.value})."
+                rec = "Maintain periodic audit and certificate lifecycle."
+            elif any(g in val_upper for g in ["AES-128", "AES128"]):
+                sev = "HIGH"
+                msg = f"{item.control} operates with 128-bit symmetric key ({item.value}) vulnerable to Grover's algorithm quadratic search."
+                rec = "Upgrade symmetric encryption keys to AES-256-GCM."
+            else:
+                sev = "HIGH" if ("RSA-2048" in val_upper or "ECDH" in val_upper) else "MEDIUM"
+                msg = f"{item.control} operates with classical asymmetric algorithm ({item.value}) vulnerable to Shor's algorithm."
+                rec = "Transition to NIST Post-Quantum Cryptographic Standards (ML-KEM / ML-DSA)."
+        elif any(c in val_upper for c in ["3DES", "DES", "MD5", "SHA-1", "TLSV1.0", "TLSV1.1"]):
+            sev = "CRITICAL" if "3DES" in val_upper else "HIGH"
+            msg = f"{item.control} configured with deprecated classical cryptographic primitive ({item.value})."
+            rec = "Replace deprecated primitive with AES-256-GCM and SHA-256/384."
+        else:
+            sev = "LOW"
+            msg = item.description or f"{item.control}: {item.value}"
+            rec = "Maintain standard operational monitoring."
 
     # Invariant: If not observable, not vulnerable
     if obs == "NOT_OBSERVABLE":

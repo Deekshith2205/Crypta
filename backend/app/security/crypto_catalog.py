@@ -3,6 +3,7 @@ Defines risk classifications, quantum threat vectors (Shor vs Grover),
 and NIST Post-Quantum Cryptography (PQC) standards mappings.
 """
 
+import re
 from typing import Dict, Any, Optional
 from enum import Enum
 
@@ -106,6 +107,58 @@ ALGORITHM_CATALOG: Dict[str, Dict[str, Any]] = {
         "vulnerability_explanation": (
             "Classical Diffie-Hellman (DHE/DH) key establishment is broken by Shor's algorithm. "
             "Under 'Store Now, Decrypt Later' (SNDL), recorded ciphertexts can be decrypted retroactively."
+        ),
+        "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
+    },
+    "DH-1024": {
+        "family": "Diffie-Hellman",
+        "category": "key_exchange",
+        "key_size": 1024,
+        "threat_vector": QuantumThreatVector.CLASSICAL_BROKEN.value,
+        "shor_vulnerable": True,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "1024-bit Diffie-Hellman is classically broken (vulnerable to Logjam attacks and precomputation) "
+            "and disallowed by NIST SP 800-131A Rev 2. It is also completely broken by Shor's algorithm on a CRQC."
+        ),
+        "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
+    },
+    "DH-2048": {
+        "family": "Diffie-Hellman",
+        "category": "key_exchange",
+        "key_size": 2048,
+        "threat_vector": QuantumThreatVector.SNDL.value,
+        "shor_vulnerable": True,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "2048-bit Diffie-Hellman provides ~112 bits of classical security, but is vulnerable to Shor's algorithm "
+            "and 'Store Now, Decrypt Later' (SNDL) attacks by quantum adversaries."
+        ),
+        "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
+    },
+    "diffie-hellman-group1-sha1": {
+        "family": "Diffie-Hellman",
+        "category": "key_exchange",
+        "key_size": 1024,
+        "threat_vector": QuantumThreatVector.CLASSICAL_BROKEN.value,
+        "shor_vulnerable": True,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "diffie-hellman-group1-sha1 uses a 1024-bit MODP group (Oakley Group 2) and deprecated SHA-1, "
+            "rendering it vulnerable to Logjam precomputations, hash collisions, and Shor's algorithm."
+        ),
+        "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
+    },
+    "diffie-hellman-group14-sha256": {
+        "family": "Diffie-Hellman",
+        "category": "key_exchange",
+        "key_size": 2048,
+        "threat_vector": QuantumThreatVector.SNDL.value,
+        "shor_vulnerable": True,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "diffie-hellman-group14-sha256 uses 2048-bit MODP group with SHA-256. Classically acceptable, "
+            "but vulnerable to quantum SNDL attacks."
         ),
         "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
     },
@@ -292,6 +345,97 @@ ALGORITHM_CATALOG: Dict[str, Dict[str, Any]] = {
 }
 
 
+def parse_dh_parameter(val_or_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Identifies and parses Diffie-Hellman parameters, groups, and key exchange algorithms.
+    Accurately extracts canonical family ('Diffie-Hellman'), key size, role ('Key Establishment'),
+    weakness classification, severity (CRITICAL vs HIGH), and NIST ML-KEM migration recommendations.
+    """
+    if not val_or_name or not isinstance(val_or_name, str):
+        return None
+    clean = val_or_name.strip()
+    clean_u = clean.upper()
+
+    # Fast validation: is this a Diffie-Hellman indicator?
+    is_dh = False
+    if any(k in clean_u for k in ("DIFFIE", "DHE", "FFDHE", "DHPARAM", "DH_PARAM", "SSL_DHPARAM")):
+        is_dh = True
+    elif "DH" in clean_u and not any(k in clean_u for k in ("ECDH", "CHACHA")):
+        # Look for DH followed or preceded by numbers, or word boundary / file extension
+        if re.search(r"(?i)(?:\b|_|-|/)dh(?:\b|_|-|\d|\.pem)", clean):
+            is_dh = True
+
+    if not is_dh:
+        return None
+
+    # Key size extraction
+    key_size = None
+    if "GROUP14" in clean_u:
+        key_size = 2048
+    elif "GROUP15" in clean_u:
+        key_size = 3072
+    elif "GROUP16" in clean_u:
+        key_size = 4096
+    elif "GROUP1" in clean_u or "GROUP2" in clean_u:
+        key_size = 1024
+    elif "1024" in clean_u:
+        key_size = 1024
+    elif "2048" in clean_u:
+        key_size = 2048
+    elif "3072" in clean_u:
+        key_size = 3072
+    elif "4096" in clean_u:
+        key_size = 4096
+    elif "768" in clean_u:
+        key_size = 768
+    else:
+        m = re.search(r"(?i)(?:dh|ffdhe)?[-_]?(\d{3,4})", clean)
+        if m:
+            try:
+                key_size = int(m.group(1))
+            except ValueError:
+                key_size = None
+
+    # Weakness determination: key_size < 2048 or SHA-1 usage
+    is_weak = False
+    if key_size is not None and key_size < 2048:
+        is_weak = True
+    if "SHA1" in clean_u or "SHA-1" in clean_u:
+        is_weak = True
+
+    # Canonical name
+    if "GROUP1-SHA1" in clean_u or "GROUP1_SHA1" in clean_u:
+        canonical_name = "diffie-hellman-group1-sha1"
+    elif "GROUP14-SHA256" in clean_u or "GROUP14_SHA256" in clean_u:
+        canonical_name = "diffie-hellman-group14-sha256"
+    elif "FFDHE" in clean_u and key_size:
+        canonical_name = f"FFDHE-{key_size}"
+    elif key_size:
+        canonical_name = f"DH-{key_size}"
+    else:
+        canonical_name = "Diffie-Hellman"
+
+    severity = "CRITICAL" if is_weak else "HIGH"
+    threat_vector = (
+        QuantumThreatVector.CLASSICAL_BROKEN.value
+        if is_weak
+        else QuantumThreatVector.SNDL.value
+    )
+
+    rec = "Upgrade to X25519 + ML-KEM-768 hybrid key exchange (NIST FIPS 203) and decommission finite-field Diffie-Hellman."
+
+    return {
+        "family": "Diffie-Hellman",
+        "role": "Key Establishment",
+        "canonical_name": canonical_name,
+        "key_size": key_size,
+        "is_weak": is_weak,
+        "severity": severity,
+        "threat_vector": threat_vector,
+        "recommendation": rec,
+        "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
+    }
+
+
 def get_algorithm_profile(algo_name: Optional[str]) -> Optional[Dict[str, Any]]:
     """Retrieves the cryptographic profile and quantum threat assessment for a primitive.
     Matches exact catalog keys or canonical algorithm identifiers.
@@ -308,6 +452,27 @@ def get_algorithm_profile(algo_name: Optional[str]) -> Optional[Dict[str, Any]]:
             return profile
 
     # 2. Canonical substring pattern matches
+    # Diffie-Hellman variants and parameters
+    dh_info = parse_dh_parameter(clean)
+    if dh_info:
+        canon = dh_info["canonical_name"]
+        if canon in ALGORITHM_CATALOG:
+            return ALGORITHM_CATALOG[canon]
+        return {
+            "family": dh_info["family"],
+            "category": "key_exchange",
+            "key_size": dh_info["key_size"],
+            "threat_vector": dh_info["threat_vector"],
+            "shor_vulnerable": True,
+            "grover_vulnerable": False,
+            "vulnerability_explanation": (
+                f"{dh_info['canonical_name']} key establishment is vulnerable to Shor's algorithm and SNDL."
+                if not dh_info["is_weak"]
+                else f"{dh_info['canonical_name']} is classically broken (inadequate key size / Logjam) and vulnerable to Shor's algorithm."
+            ),
+            "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
+        }
+
     # Classically broken primitives
     if any(k in clean for k in ["3DES", "TRIPLE-DES", "DES-EDE"]):
         return ALGORITHM_CATALOG.get("3DES")

@@ -360,11 +360,21 @@ class SafeConfigParser:
                 sep = "=" if "=" in line_str else ":"
                 k, v = line_str.split(sep, 1)
                 key = k.strip()
-                val = v.strip()
+                val = v.strip().rstrip(";")
                 raw[current_section][key] = val
                 path = f"{current_section}.{key}" if current_section != "DEFAULT" else key
                 # Detect list if comma or space separated ciphers/protocols
                 entries.append(self._create_entry(path, val, line_no))
+            else:
+                # Support space-separated directives in .conf files (e.g. nginx/apache/ssh directives)
+                parts = line_str.split(None, 1)
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    val = parts[1].strip().rstrip(";")
+                    if re.match(r"^[a-zA-Z0-9_\-\.]+$", key) and not key.startswith(("{", "}", "[", "]")):
+                        raw[current_section][key] = val
+                        path = f"{current_section}.{key}" if current_section != "DEFAULT" else key
+                        entries.append(self._create_entry(path, val, line_no))
 
         return raw, entries
 
