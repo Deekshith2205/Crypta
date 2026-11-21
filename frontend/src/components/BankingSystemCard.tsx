@@ -407,33 +407,59 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
 
         </div>
 
-        {/* Task 5: Audit Verification Status */}
+        {/* Task C8: Audit Verification Status & Cryptographic Proof */}
         {(auditResult || reportActionError) && (
           <div className="mt-3 space-y-2">
-
             {auditResult && (
               <div
-                className={`flex items-center gap-2 text-xs font-semibold ${
+                className={`p-2.5 rounded border text-xs ${
                   auditResult.valid
-                    ? 'text-emerald-700'
-                    : 'text-red-700'
+                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                    : auditResult.status === 'RECORD_NOT_IN_LEDGER'
+                    ? 'bg-amber-50/70 border-amber-200 text-amber-900'
+                    : 'bg-red-50/70 border-red-200 text-red-900'
                 }`}
                 role="status"
               >
-                {auditResult.valid ? (
-                  <ShieldCheck className="w-4 h-4" />
-                ) : (
-                  <ShieldAlert className="w-4 h-4" />
-                )}
+                <div className="flex items-center gap-2 font-semibold">
+                  {auditResult.valid ? (
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  ) : (
+                    <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  )}
+                  <span>
+                    {auditResult.valid
+                      ? 'Cryptographically signed, hash-chained audit record verified'
+                      : `Audit verification alert: ${auditResult.error || 'Integrity check unsuccessful'}`}
+                  </span>
+                </div>
 
-                <span>
-                  {auditResult.valid
-                    ? 'Audit record verified'
-                    : `Audit verification failed: ${
-                        auditResult.error ||
-                        'Integrity check unsuccessful'
-                      }`}
-                </span>
+                <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] font-mono opacity-90">
+                  {auditResult.record_id && (
+                    <div>
+                      <span className="font-sans font-medium text-slate-500">Record ID: </span>
+                      <span>{auditResult.record_id.slice(0, 18)}...</span>
+                    </div>
+                  )}
+                  {Boolean(auditResult.details?.assessment_hash) && (
+                    <div>
+                      <span className="font-sans font-medium text-slate-500">Content Hash: </span>
+                      <span>{String(auditResult.details.assessment_hash).slice(0, 16)}...</span>
+                    </div>
+                  )}
+                  <div>
+                    <span className="font-sans font-medium text-slate-500">Signature: </span>
+                    <span className={auditResult.status === 'INVALID_SIGNATURE' ? 'text-red-600 font-bold' : 'text-emerald-700'}>
+                      {auditResult.status === 'INVALID_SIGNATURE' ? 'FAILED' : 'HMAC-SHA256 Valid'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-sans font-medium text-slate-500">Ledger Membership: </span>
+                    <span className={auditResult.status === 'RECORD_NOT_IN_LEDGER' ? 'text-amber-700 font-bold' : auditResult.valid ? 'text-emerald-700' : 'text-slate-600'}>
+                      {auditResult.status === 'RECORD_NOT_IN_LEDGER' ? 'NOT IN LEDGER' : auditResult.valid ? 'Verified in Ledger' : 'Unconfirmed'}
+                    </span>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -442,7 +468,6 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
                 {reportActionError}
               </p>
             )}
-
           </div>
         )}
 

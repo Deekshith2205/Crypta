@@ -655,16 +655,35 @@ export type AuditRecord = {
   previous_hash: string;
   current_hash: string;
   timestamp: string;
+  signature?: string;
   schema_version: string;
   canonical_payload?: string | null;
 };
 
 export type AuditVerificationResult = {
   valid: boolean;
+  status?: string;
   record_id?: string | null;
   error?: string | null;
   records_checked: number;
   details: Record<string, unknown>;
+};
+
+export type AuditLedgerResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  records: AuditRecord[];
+};
+
+export type AuditHeadResponse = {
+  record_id?: string | null;
+  current_hash: string;
+  timestamp?: string | null;
+  record_count: number;
+  chain_valid: boolean;
+  status: string;
+  checkpoint?: Record<string, unknown> | null;
 };
 
 export type CompleteAssessmentReport = {

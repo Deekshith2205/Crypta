@@ -8,6 +8,8 @@ import type {
   WhatIfMigrationResult,
   AuditRecord,
   AuditVerificationResult,
+  AuditLedgerResponse,
+  AuditHeadResponse,
   CompleteAssessmentReport,
   ArtifactFindingsResponse,
   UploadedCertificateResponse,
@@ -324,6 +326,66 @@ export async function verifyAuditRecord(
 
   return response.json();
 }
+
+export async function getAuditLedger(
+  limit: number = 50,
+  offset: number = 0,
+  systemId?: string
+): Promise<AuditLedgerResponse> {
+  const query = new URLSearchParams({
+    limit: limit.toString(),
+    offset: offset.toString(),
+  });
+  if (systemId) {
+    query.append('system_id', systemId);
+  }
+  const path = `/api/audit/ledger?${query.toString()}`;
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`);
+  } catch {
+    try {
+      response = await fetch(`http://127.0.0.1:8000${path}`);
+    } catch {
+      throw new Error('Unable to connect to the audit ledger service.');
+    }
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      errorData.detail || `Audit ledger query failed with HTTP ${response.status}`
+    );
+  }
+
+  return response.json();
+}
+
+export async function getAuditHead(): Promise<AuditHeadResponse> {
+  const path = '/api/audit/head';
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`);
+  } catch {
+    try {
+      response = await fetch(`http://127.0.0.1:8000${path}`);
+    } catch {
+      throw new Error('Unable to connect to the audit head service.');
+    }
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(
+      errorData.detail || `Audit head query failed with HTTP ${response.status}`
+    );
+  }
+
+  return response.json();
+}
+
 
 // ==============================================================================
 // TASK 6: UPLOADED ARTIFACT SCANNING

@@ -617,3 +617,35 @@ python -m pytest backend/tests/test_ai_intelligence.py -v
 # Run full test suite
 python -m pytest -q
 ```
+
+---
+
+## 13. Cryptographically Signed, Hash-Chained Audit Trail (Phase C)
+
+QuantumShield incorporates a tamper-evident audit trail for all finalized banking system assessments and security reports.
+
+### Architecture & Guarantees
+1. **Deterministic Canonical Hashing (RFC 8785)**: Every assessment payload is normalized with stable key ordering, uniform UTF-8 serialization, and exclusion of volatile runtime metadata (e.g., timestamps, random report IDs) using SHA-256 (`assessment_hash`).
+2. **Cryptographic Signing (HMAC-SHA256)**: Each audit record is signed using a persistent, secure 256-bit key (`QS_AUDIT_SIGNING_KEY` or `data/audit_signing.key`). Signing keys are never exposed in API payloads, logs, or reports.
+3. **Cryptographic Hash Chain Linkage**: Each record cryptographically links to the previous record's head hash:
+   $$\text{current\_hash} = \text{SHA-256}(\text{canonical\_payload} + \text{previous\_hash})$$
+4. **Persistent SQLite Ledger**: Records are committed to an ACID-compliant SQLite ledger (`data/audit_ledger.db`) with WAL mode, row locking, and indexed record IDs.
+5. **Controlled Creation & Idempotency**: `GET` requests never append records to the ledger. Idempotency checks prevent duplicate record insertion during retries of identical assessments.
+6. **Comprehensive Verification**: The verification engine independently validates:
+   - Payload hash integrity (`PAYLOAD_HASH_MISMATCH`)
+   - HMAC-SHA256 signature (`INVALID_SIGNATURE`)
+   - Hash chain continuity (`CHAIN_BROKEN`)
+   - Persistent ledger membership (`RECORD_NOT_IN_LEDGER`)
+   - Ledger checkpoint consistency (`LEDGER_CORRUPTED`)
+
+### Read-Only Audit Ledger APIs
+- `GET /api/audit/ledger?limit=50&offset=0&system_id=...`: Retrieves paginated record metadata in stable insertion order without modifying state or leaking keys.
+- `GET /api/audit/head`: Returns latest head hash, record count, and chain verification status.
+- `POST /api/audit/verify`: Verifies individual record payload, HMAC signature, and ledger presence.
+- `POST /api/audit/verify-chain`: Verifies sequence continuity across chained records.
+
+### Documented Security Limitations & Residual Risks
+- **Signing Key Protection**: HMAC-SHA256 integrity strictly depends on protecting the host signing key. An attacker who compromises the host and obtains the signing key can compute valid HMAC signatures for arbitrary records.
+- **Suffix Truncation & External Checkpointing**: A hash chain alone does not detect deletion of the entire ledger suffix if an attacker rewrites the database file. QuantumShield records anchor checkpoints (`audit_checkpoints`), but external anchoring or off-site log streaming is required to detect full ledger truncation if both the DB and filesystem are compromised.
+- **Storage Protection**: SQLite persistence provides restart durability and transaction isolation, but does not provide hardware-enforced write-once-read-many (WORM) storage against an administrator or attacker with local write access to the SQLite file.
+- **No Blockchain Claims**: QuantumShield implements a deterministic hash-chained audit ledger, not a distributed consensus blockchain or absolute tamper-proof system.
