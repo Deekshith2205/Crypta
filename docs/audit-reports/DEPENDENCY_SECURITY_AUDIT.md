@@ -44,8 +44,10 @@ To resolve the independent security audit's PARTIAL finding regarding loose sema
 | `PyYAML` | `>=6.0.0,<7.0.0` | `6.0.4` | Hardened YAML configuration parsing |
 | `certifi` | `>=2024.2.2` | `2026.11.20` | Authoritative Mozilla CA certificate bundle |
 | `reportlab` | `>=4.1.0,<5.0.0` | `4.5.1` | PDF executive report generator (`app.services.report_service`) |
+| `cyclonedx-python-lib` | `>=9.0.0,<12.0.0` | `11.12.0` | Official CycloneDX 1.7 schema validation (`app.cbom`) |
+| `redis` | `>=5.0.0,<9.0.0` | `8.1.0` | Distributed atomic rate limiting & shared budget enforcement (`app.ai.budget`) |
 
-*Note on `reportlab`:* During initial clean-room installation verification, `reportlab` was discovered as a required runtime import for PDF report generation (`/api/banking/systems/{id}/report/pdf`). It was formally added to `requirements.in` and pinned in `requirements.lock`.
+*Note on `reportlab`, `cyclonedx-python-lib`, and `redis`:* During verification and CI hardening, `reportlab` was verified for PDF report generation, `cyclonedx-python-lib` for official CycloneDX 1.7 schema validation, and `redis` for shared atomic AI budget tracking. All were formally added to `requirements.in` and `requirements.txt` with bounded constraints and pinned with SHA-256 integrity hashes in `requirements.lock`.
 
 ### 2.3 Lockfile Generation
 - **Target Python Version:** Python 3.13.1
