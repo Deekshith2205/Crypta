@@ -139,14 +139,22 @@ export const DomainScannerInput: React.FC<DomainScannerInputProps> = ({
 
       {/* Validation or Inline Warning Notice */}
       {validationError && (
-        <div className="flex items-center space-x-1.5 text-xs text-rose-600 bg-rose-50 border border-rose-200/80 px-3 py-2 rounded-lg font-mono">
+        <div
+          role="alert"
+          aria-live="polite"
+          className="flex items-center space-x-1.5 text-xs text-rose-600 bg-rose-50 border border-rose-200/80 px-3 py-2 rounded-lg font-mono"
+        >
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
           <span>{validationError}</span>
         </div>
       )}
 
       {!validationError && inlineWarning && (
-        <div className="flex items-center space-x-1.5 text-[11.5px] text-amber-700 bg-amber-50/90 border border-amber-200/70 px-3 py-1.5 rounded-lg">
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center space-x-1.5 text-[11.5px] text-amber-700 bg-amber-50/90 border border-amber-200/70 px-3 py-1.5 rounded-lg"
+        >
           <AlertCircle className="w-3.5 h-3.5 shrink-0 text-amber-600" />
           <span>{inlineWarning}</span>
         </div>

@@ -24,8 +24,17 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-[1500px] mx-auto px-6 sm:px-10 lg:px-[85px] h-[80px] flex items-center justify-between">
         {/* Brand Logo & Wordmark (Starts ~85px from left edge) */}
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="QuantumShield Home - Switch to scanner view"
           onClick={() => onSelectView('scanner')}
-          className="flex items-center space-x-2.5 cursor-pointer group select-none shrink-0"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onSelectView('scanner');
+            }
+          }}
+          className="flex items-center space-x-2.5 cursor-pointer group select-none shrink-0 rounded-xl focus-visible:ring-2 focus-visible:ring-[#5755D9] focus-visible:outline-none"
         >
           {/* Stylized QuantumShield Badge */}
           <div className="w-9 h-9 rounded-xl bg-[#F4F3FF] border border-[#5755D9]/30 flex items-center justify-center text-[#5755D9] shadow-2xs group-hover:border-[#5755D9]/60 transition-colors">
