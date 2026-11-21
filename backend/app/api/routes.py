@@ -7,7 +7,7 @@ import asyncio
 from typing import Dict, List, Any, Optional
 import logging
 from datetime import datetime, timezone
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Request, status, Query
 from fastapi.responses import JSONResponse
 
 from app.schemas.scan import (
@@ -52,6 +52,7 @@ from app.ai.schemas import (
     ReportExplanationRequest,
     ReportExplanationResponse,
 )
+from app.services.audit_chain_service import DEFAULT_AUDIT_CHAIN_SERVICE, GENESIS_PREVIOUS_HASH
 
 logger = logging.getLogger("quantumshield.api")
 router = APIRouter()
@@ -668,7 +669,6 @@ def verify_audit_chain_endpoint(records_data: List[Dict[str, Any]]):
     Detects broken chains, altered sequence history, or corrupted records.
     """
     from app.models.audit_chain import AuditRecord
-    from app.services.audit_chain_service import DEFAULT_AUDIT_CHAIN_SERVICE
     try:
         records = [AuditRecord(**r) for r in records_data]
         result = DEFAULT_AUDIT_CHAIN_SERVICE.verify_audit_chain(records)
@@ -678,6 +678,133 @@ def verify_audit_chain_endpoint(records_data: List[Dict[str, Any]]):
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"error": "INVALID_CHAIN_RECORDS", "detail": str(e)},
         )
+
+
+@router.get("/audit/ledger", tags=["Reports & Auditability"])
+def get_audit_ledger_endpoint(
+    limit: int = Query(default=50, ge=1, le=500, description="Page limit (1 to 500)"),
+    offset: int = Query(default=0, ge=0, description="Record offset"),
+    system_id: Optional[str] = Query(default=None, description="Optional system ID filter"),
+):
+    """
+    Returns paginated audit record metadata in stable order.
+    Read-only GET operation that never mutates ledger state or leaks secrets.
+    """
+    try:
+        svc = DEFAULT_AUDIT_CHAIN_SERVICE
+        storage = svc._storage
+        if storage is not None:
+            total = storage.get_record_count(assessment_id=system_id)
+            records = storage.get_records(limit=limit, offset=offset, assessment_id=system_id)
+        else:
+            in_mem = [r for r in svc._in_memory_fallback if (system_id is None or r.assessment_id == system_id)]
+            total = len(in_mem)
+            records = in_mem[offset:offset + limit]
+
+        # Return metadata safely, ensuring no internal paths or sensitive attributes leak
+        serialized_records = [
+            {
+                "record_id": r.record_id,
+                "assessment_id": r.assessment_id,
+                "assessment_hash": r.assessment_hash,
+                "previous_hash": r.previous_hash,
+                "current_hash": r.current_hash,
+                "timestamp": r.timestamp,
+                "signature": r.signature,
+                "schema_version": r.schema_version,
+            }
+            for r in records
+        ]
+
+        return {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "records": serialized_records,
+        }
+    except Exception as e:
+        logger.error(f"Error querying audit ledger: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "AUDIT_LEDGER_ERROR",
+                "detail": "An internal error occurred while querying the audit ledger.",
+            },
+        )
+
+
+@router.get("/audit/head", tags=["Reports & Auditability"])
+def get_audit_head_endpoint():
+    """
+    Returns the current audit ledger head metadata and cryptographic verification status.
+    Read-only GET operation.
+    """
+    try:
+        svc = DEFAULT_AUDIT_CHAIN_SERVICE
+        storage = svc._storage
+
+        if storage is not None:
+            total = storage.get_record_count()
+            if total == 0:
+                return {
+                    "record_id": None,
+                    "current_hash": GENESIS_PREVIOUS_HASH,
+                    "timestamp": None,
+                    "record_count": 0,
+                    "chain_valid": True,
+                    "status": "EMPTY",
+                    "checkpoint": None,
+                }
+            latest_records = storage.get_records(limit=1, offset=total - 1)
+            latest = latest_records[0] if latest_records else None
+            checkpoint = storage.get_latest_checkpoint() if hasattr(storage, "get_latest_checkpoint") else None
+        else:
+            total = len(svc._in_memory_fallback)
+            if total == 0:
+                return {
+                    "record_id": None,
+                    "current_hash": GENESIS_PREVIOUS_HASH,
+                    "timestamp": None,
+                    "record_count": 0,
+                    "chain_valid": True,
+                    "status": "EMPTY",
+                    "checkpoint": None,
+                }
+            latest = svc._in_memory_fallback[-1]
+            checkpoint = None
+
+        if latest is None:
+            return {
+                "record_id": None,
+                "current_hash": GENESIS_PREVIOUS_HASH,
+                "timestamp": None,
+                "record_count": 0,
+                "chain_valid": True,
+                "status": "EMPTY",
+                "checkpoint": None,
+            }
+
+        verify_res = svc.verify_ledger()
+
+        return {
+            "record_id": latest.record_id,
+            "current_hash": latest.current_hash,
+            "timestamp": latest.timestamp,
+            "record_count": total,
+            "chain_valid": verify_res.valid,
+            "status": verify_res.status,
+            "checkpoint": checkpoint,
+        }
+    except Exception as e:
+        logger.error(f"Error querying audit head: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "AUDIT_HEAD_ERROR",
+                "detail": "An internal error occurred while retrieving the audit ledger head.",
+            },
+        )
+
 
 
 @router.post("/scan/config", tags=["Configuration Scanning"])
