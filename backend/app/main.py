@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router as api_router
 from app.security.error_handler import register_exception_handlers
+from app.security.middleware import RequestSizeLimitMiddleware, SecurityHeadersMiddleware
 
 # Configure clean logging
 logging.basicConfig(
@@ -56,6 +57,10 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
     allow_headers=["*"],
 )
+
+# Enforce 5 MiB request body limits and attach baseline security headers
+app.add_middleware(RequestSizeLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Register API routes
 app.include_router(api_router, prefix="/api")
