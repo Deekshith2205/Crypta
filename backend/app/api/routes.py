@@ -23,7 +23,13 @@ from app.models.simulation import WhatIfMigrationRequest, WhatIfMigrationResult
 from app.services.assessment_service import AssessmentService
 from app.services.audit_service import AuditService
 from app.scanners.domain_validator import DomainValidationError
-from app.security.network import UnsafeTargetError, DnsResolutionError
+from app.security.network import (
+    UnsafeTargetError,
+    DnsResolutionError,
+    validate_scan_port,
+    DisallowedPortError,
+    InvalidPortError,
+)
 from app.security.rate_limiter import (
     DEFAULT_RATE_LIMITER,
     UPLOAD_SCAN_RATE_LIMITER,
@@ -83,7 +89,6 @@ async def run_scan(request: ScanRequest, http_request: Request):
     for the provided domain.
     """
     domain = request.domain.strip() if request.domain else ""
-    port = request.port or 443
 
     # Fast validation for empty domain before consuming concurrency or rate limiter
     if not domain:
@@ -92,6 +97,28 @@ async def run_scan(request: ScanRequest, http_request: Request):
             content={
                 "error": "DOMAIN_VALIDATION_ERROR",
                 "detail": "Domain parameter cannot be empty.",
+                "target_domain": domain,
+            },
+        )
+
+    # Validate port before consuming rate limits or concurrency
+    try:
+        port = validate_scan_port(request.port if request.port is not None else 443)
+    except InvalidPortError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "INVALID_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
+    except DisallowedPortError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "DISALLOWED_PORT",
+                "detail": str(e),
                 "target_domain": domain,
             },
         )
@@ -137,6 +164,28 @@ async def run_scan(request: ScanRequest, http_request: Request):
             None, assessment_service.assess_domain, domain, port, probe_pqc, asset_id
         )
         return result
+
+    except InvalidPortError as e:
+        logger.warning(f"Invalid port for target '{domain}': {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "INVALID_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
+
+    except DisallowedPortError as e:
+        logger.warning(f"Disallowed port for target '{domain}': {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "DISALLOWED_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
 
     except UnsafeTargetError as e:
         logger.warning(f"SSRF prevention triggered for target '{domain}': {str(e)}")
@@ -237,7 +286,6 @@ async def run_audit(request: AuditRequest, http_request: Request):
     Zero Trust Verification -> Multidimensional Risk Separation.
     """
     domain = request.domain.strip() if request.domain else ""
-    port = request.port or 443
 
     if not domain:
         return JSONResponse(
@@ -245,6 +293,28 @@ async def run_audit(request: AuditRequest, http_request: Request):
             content={
                 "error": "DOMAIN_VALIDATION_ERROR",
                 "detail": "Domain parameter cannot be empty.",
+                "target_domain": domain,
+            },
+        )
+
+    # Validate port before consuming rate limits or concurrency
+    try:
+        port = validate_scan_port(request.port if request.port is not None else 443)
+    except InvalidPortError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "INVALID_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
+    except DisallowedPortError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "DISALLOWED_PORT",
+                "detail": str(e),
                 "target_domain": domain,
             },
         )
@@ -287,6 +357,28 @@ async def run_audit(request: AuditRequest, http_request: Request):
             None, audit_service.audit_target, domain, port, request
         )
         return result
+
+    except InvalidPortError as e:
+        logger.warning(f"Invalid port during audit for '{domain}': {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "INVALID_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
+
+    except DisallowedPortError as e:
+        logger.warning(f"Disallowed port during audit for '{domain}': {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "DISALLOWED_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
 
     except UnsafeTargetError as e:
         logger.warning(f"SSRF prevention triggered during audit for '{domain}': {str(e)}")

@@ -13,7 +13,7 @@ from app.models.risk import BankingRiskAssessment
 
 class ScanRequest(BaseModel):
     domain: str = Field(..., description="Target domain or hostname (e.g. example.com)")
-    port: int = Field(default=443, ge=1, le=65535, description="Port number (defaults to 443)")
+    port: Optional[Any] = Field(default=443, description="Port number (defaults to 443)")
     probe_pqc: bool = Field(default=False, description="Whether to perform an active TLS 1.3 hybrid PQC capability probe if default is classical")
     asset_id: Optional[str] = Field(default=None, description="Optional banking asset / profile ID to associate with the scan")
 

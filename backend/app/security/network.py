@@ -10,9 +10,10 @@ Enforces:
 
 import ipaddress
 import logging
+import os
 import time
 from dataclasses import dataclass
-from typing import List, Tuple, Set
+from typing import List, Tuple, Set, Optional, Any
 
 import dns.exception
 import dns.resolver
@@ -35,6 +36,92 @@ class UnsafeTargetError(NetworkSecurityError):
 class DnsResolutionError(NetworkSecurityError):
     """Raised when DNS resolution fails or times out."""
     pass
+
+
+class PortSecurityError(NetworkSecurityError):
+    """Base exception for port validation failures."""
+    pass
+
+
+class DisallowedPortError(PortSecurityError):
+    """Raised when scan target port is not in the allowed scan ports list."""
+    pass
+
+
+class InvalidPortError(PortSecurityError):
+    """Raised when scan target port is not a valid TCP port number."""
+    pass
+
+
+# Default allowed ports for live scans (standard TLS services: HTTPS, HTTPS-alt, IMAPS, POP3S, SMTPS)
+DEFAULT_ALLOWED_SCAN_PORTS: Set[int] = {443, 8443, 993, 995, 465}
+
+
+def get_allowed_scan_ports() -> Set[int]:
+    """
+    Returns the set of allowed scan ports.
+    Configurable via environment variable QS_ALLOWED_SCAN_PORTS or ALLOWED_SCAN_PORTS
+    (comma-separated integers, e.g. '443,8443,993,995,465').
+    Falls back to DEFAULT_ALLOWED_SCAN_PORTS if unset or invalid.
+    """
+    env_val = os.environ.get("QS_ALLOWED_SCAN_PORTS", os.environ.get("ALLOWED_SCAN_PORTS", "")).strip()
+    if not env_val:
+        return set(DEFAULT_ALLOWED_SCAN_PORTS)
+    try:
+        ports = set()
+        for p in env_val.split(","):
+            p_str = p.strip()
+            if p_str:
+                p_int = int(p_str)
+                if 1 <= p_int <= 65535:
+                    ports.add(p_int)
+        return ports if ports else set(DEFAULT_ALLOWED_SCAN_PORTS)
+    except Exception as e:
+        logger.warning("Invalid QS_ALLOWED_SCAN_PORTS configuration '%s': %s. Using defaults.", env_val, e)
+        return set(DEFAULT_ALLOWED_SCAN_PORTS)
+
+
+def validate_scan_port(port: Any, allowed_ports: Optional[Set[int]] = None) -> int:
+    """
+    Validates that a port is a valid integer between 1 and 65535 and is present
+    in the allowed scan ports allowlist.
+
+    Raises:
+        InvalidPortError: If port is not an integer or outside 1..65535.
+        DisallowedPortError: If port is a valid TCP port but not in the allowlist.
+    Returns:
+        int: The validated port number.
+    """
+    if port is None or isinstance(port, bool):
+        raise InvalidPortError(f"Invalid port: {port}. Port must be an integer between 1 and 65535.")
+
+    if isinstance(port, float):
+        raise InvalidPortError(f"Invalid port: {port}. Port cannot be a floating-point number.")
+
+    if isinstance(port, str):
+        cleaned = port.strip()
+        if not (cleaned.isdigit() or (cleaned.startswith("+") and cleaned[1:].isdigit())):
+            raise InvalidPortError(f"Invalid port: '{port}'. Port must be an integer between 1 and 65535.")
+        try:
+            port_int = int(cleaned)
+        except ValueError:
+            raise InvalidPortError(f"Invalid port: '{port}'. Port must be an integer between 1 and 65535.")
+    elif isinstance(port, int):
+        port_int = port
+    else:
+        raise InvalidPortError(f"Invalid port: {port}. Port must be an integer between 1 and 65535.")
+
+    if port_int < 1 or port_int > 65535:
+        raise InvalidPortError(f"Port {port_int} out of range. Port must be between 1 and 65535.")
+
+    active_allowed = allowed_ports if allowed_ports is not None else get_allowed_scan_ports()
+    if port_int not in active_allowed:
+        raise DisallowedPortError(
+            f"Port {port_int} is not an allowed scan port. Allowed ports: {sorted(list(active_allowed))}."
+        )
+
+    return port_int
+
 
 
 # Explicit list of prohibited IPv4 networks (defense-in-depth)

@@ -22,7 +22,7 @@ from app.schemas.scan import ScanResponse
 class AuditRequest(BaseModel):
     """Request payload for a banking security audit."""
     domain: str = Field(..., description="Target banking hostname / FQDN (e.g. ebanking.chase.com)")
-    port: int = Field(default=443, ge=1, le=65535, description="Port number (defaults to 443)")
+    port: Optional[Any] = Field(default=443, description="Port number (defaults to 443)")
     probe_pqc: bool = Field(default=False, description="Whether to probe for hybrid post-quantum key exchange support")
     asset_id: Optional[str] = Field(default=None, description="Pre-configured synthetic profile or existing banking asset ID")
     asset_name: Optional[str] = Field(default=None, description="Custom asset name (e.g. Retail Core Gateway)")
