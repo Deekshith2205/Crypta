@@ -783,6 +783,8 @@ def get_audit_head_endpoint():
                     "chain_valid": True,
                     "status": "EMPTY",
                     "checkpoint": None,
+                    "external_anchor": "UNCONFIGURED",
+                    "external_checkpoint": None,
                 }
             latest_records = storage.get_records(limit=1, offset=total - 1)
             latest = latest_records[0] if latest_records else None
@@ -798,6 +800,8 @@ def get_audit_head_endpoint():
                     "chain_valid": True,
                     "status": "EMPTY",
                     "checkpoint": None,
+                    "external_anchor": "UNCONFIGURED",
+                    "external_checkpoint": None,
                 }
             latest = svc._in_memory_fallback[-1]
             checkpoint = None
@@ -811,6 +815,8 @@ def get_audit_head_endpoint():
                 "chain_valid": True,
                 "status": "EMPTY",
                 "checkpoint": None,
+                "external_anchor": "UNCONFIGURED",
+                "external_checkpoint": None,
             }
 
         verify_res = svc.verify_ledger()
