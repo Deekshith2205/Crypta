@@ -40,6 +40,7 @@ from app.security.rate_limiter import (
 )
 from app.scanners.tls_scanner import TlsScanError, TlsTimeoutError, TlsConnectionError
 from app.ai.service import DEFAULT_AI_SERVICE
+from app.ai.budget import AI_BUDGET_TRACKER
 from app.ai.schemas import (
     AIStatusResponse,
     AIExplanationResult,
@@ -579,7 +580,7 @@ def get_system_cbom(system_id: str):
 
 
 @router.get("/banking/systems/{system_id}/report/json", tags=["Reports & Auditability"])
-async def get_system_json_report(system_id: str, include_ai: bool = False):
+async def get_system_json_report(system_id: str, http_request: Request, include_ai: bool = False):
     """
     Returns a comprehensive, machine-readable post-quantum assessment report
     sealed with a cryptographic audit hash chain record.
@@ -587,6 +588,20 @@ async def get_system_json_report(system_id: str, include_ai: bool = False):
     """
     from app.services.report_service import build_complete_json_report
     from app.models.profiles import get_synthetic_profile_by_id
+
+    if include_ai:
+        client_ip = get_client_ip(http_request)
+        allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+        if not allowed:
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry_after)},
+                content={
+                    "error": "RATE_LIMIT_EXCEEDED",
+                    "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+                },
+            )
+
     if not get_synthetic_profile_by_id(system_id):
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -607,7 +622,7 @@ async def get_system_json_report(system_id: str, include_ai: bool = False):
 
 
 @router.get("/banking/systems/{system_id}/report/pdf", tags=["Reports & Auditability"])
-async def get_system_pdf_report(system_id: str, include_ai: bool = False):
+async def get_system_pdf_report(system_id: str, http_request: Request, include_ai: bool = False):
     """
     Generates and returns an executive-grade, professional PDF audit report.
     Optionally enriches with AI report explanation when include_ai=True and provider is configured.
@@ -615,6 +630,20 @@ async def get_system_pdf_report(system_id: str, include_ai: bool = False):
     from app.services.report_service import generate_pdf_report, build_complete_json_report
     from app.models.profiles import get_synthetic_profile_by_id
     from fastapi import Response
+
+    if include_ai:
+        client_ip = get_client_ip(http_request)
+        allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+        if not allowed:
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry_after)},
+                content={
+                    "error": "RATE_LIMIT_EXCEEDED",
+                    "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+                },
+            )
+
     if not get_synthetic_profile_by_id(system_id):
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1287,6 +1316,23 @@ def get_ai_status(http_request: Request):
             },
         )
     return DEFAULT_AI_SERVICE.get_status()
+
+
+@router.get("/ai/budget", tags=["AI Readiness Intelligence"])
+def get_ai_budget(http_request: Request):
+    """Returns the current daily AI usage budget and consumption metrics."""
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+            },
+        )
+    return AI_BUDGET_TRACKER.get_status()
 
 
 @router.post(

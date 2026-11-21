@@ -32,6 +32,7 @@ from app.ai.providers.factory import get_ai_provider
 from app.ai.sanitization import sanitize_dict_fields, sanitize_text
 from app.ai.validation import validate_ai_explanation
 from app.ai.fallback import DeterministicExplanationService
+from app.ai.budget import AI_BUDGET_TRACKER
 from app.ai.schemas import (
     AIStatusResponse,
     AIExplanationResult,
@@ -213,11 +214,28 @@ class QuantumReadinessAIService:
                 disclaimer=DEFAULT_ADVISORY_DISCLAIMER,
             )
 
+        # Daily token and cost budget protection (Task D4)
+        estimated_input_tokens = AI_BUDGET_TRACKER.estimate_tokens(prompt)
+        if not AI_BUDGET_TRACKER.can_consume(estimated_input_tokens):
+            logger.warning("AI daily budget limit exceeded. Blocking provider call.")
+            return AIExplanationResult[M](
+                success=False,
+                is_available=True,
+                provider=self._provider.provider_name,
+                data=None,
+                error="AI daily usage budget exceeded. Please try again tomorrow.",
+                disclaimer=DEFAULT_ADVISORY_DISCLAIMER,
+            )
+
         try:
             raw_output = await self._provider.generate(
                 prompt=prompt,
                 system_prompt=SYSTEM_PROMPT_CORE_RULES,
             )
+
+            # Record token usage against daily budget
+            estimated_output_tokens = AI_BUDGET_TRACKER.estimate_tokens(raw_output)
+            AI_BUDGET_TRACKER.record_usage(estimated_input_tokens, estimated_output_tokens)
 
             cleaned_json = _extract_clean_json(raw_output)
             json_dict = json.loads(cleaned_json)
