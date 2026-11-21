@@ -12,24 +12,61 @@ from app.models.audit_chain import AuditRecord, AuditVerificationResult
 
 GENESIS_PREVIOUS_HASH: str = "0" * 64
 
+VOLATILE_FIELD_KEYS = {
+    "timestamp",
+    "scanned_at",
+    "created_at",
+    "generated_at",
+    "report_id",
+    "simulation_id",
+    "record_id",
+    "audit_record_id",
+    "execution_time_ms",
+    "latency_ms",
+    "duration_ms",
+}
 
-def canonicalize_json(data: Any) -> str:
+
+def strip_volatile_fields(data: Any) -> Any:
+    """Recursively removes volatile timestamps, generated report IDs, and execution latency fields."""
+    if hasattr(data, "model_dump"):
+        data = data.model_dump(mode="json")
+    elif hasattr(data, "dict"):
+        data = data.dict()
+
+    if isinstance(data, dict):
+        return {
+            k: strip_volatile_fields(v)
+            for k, v in data.items()
+            if k.lower() not in VOLATILE_FIELD_KEYS
+        }
+    elif isinstance(data, list):
+        return [strip_volatile_fields(item) for item in data]
+    else:
+        return data
+
+
+def canonicalize_json(data: Any, strip_volatile: bool = False) -> str:
     """
     Produces deterministic, RFC 8785 canonical JSON serialization:
     - Sorts dictionary keys lexicographically
     - Uses compact formatting (no indentation, no extra whitespace after ':' or ',')
     - Handles nested dictionaries, lists, and primitives consistently
+    - Optionally strips volatile metadata fields
     """
     if hasattr(data, "model_dump"):
         data = data.model_dump(mode="json")
     elif hasattr(data, "dict"):
         data = data.dict()
 
+    if strip_volatile:
+        data = strip_volatile_fields(data)
+
     return json.dumps(
         data,
         sort_keys=True,
         separators=(",", ":"),
-        ensure_ascii=True,
+        ensure_ascii=False,
         default=str,
     )
 
@@ -37,6 +74,12 @@ def canonicalize_json(data: Any) -> str:
 def compute_sha256(data_str: str) -> str:
     """Computes SHA-256 hexadecimal digest of UTF-8 encoded string."""
     return hashlib.sha256(data_str.encode("utf-8")).hexdigest()
+
+
+def compute_payload_hash(data: Any) -> str:
+    """Computes deterministic SHA-256 content hash of assessment payload with volatile metadata excluded."""
+    canonical = canonicalize_json(data, strip_volatile=True)
+    return compute_sha256(canonical)
 
 
 class AuditChainService:
