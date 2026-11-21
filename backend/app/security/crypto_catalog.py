@@ -510,7 +510,7 @@ def get_algorithm_profile(algo_name: Optional[str]) -> Optional[Dict[str, Any]]:
         return ALGORITHM_CATALOG.get("AES-128")
 
     # Shor-vulnerable asymmetric public-key and key-exchange algorithms
-    if "RSA" in clean:
+    if any(k in clean for k in ["RSA", "OAEP", "PKCS1", "PKCS#1", "PSS"]):
         return ALGORITHM_CATALOG.get("RSA")
     if "ECDHE" in clean or "X25519" in clean:
         return ALGORITHM_CATALOG.get("ECDHE")
@@ -524,21 +524,39 @@ def get_algorithm_profile(algo_name: Optional[str]) -> Optional[Dict[str, Any]]:
     return None
 
 
+def is_known_algorithm(val_or_name: Optional[str]) -> bool:
+    """Returns True if val_or_name represents a recognized, established cryptographic algorithm or protocol."""
+    if not val_or_name:
+        return False
+    clean = str(val_or_name).strip()
+    if clean.upper() in ("", "NONE", "N/A", "UNKNOWN", "NOT OBSERVABLE", "NOT_OBSERVABLE", "UNSPECIFIED", "NULL"):
+        return False
+    if clean.upper() in ALGORITHM_CATALOG or clean in ALGORITHM_CATALOG:
+        return True
+    if parse_dh_parameter(clean) is not None:
+        return True
+    if get_algorithm_profile(clean) is not None:
+        return True
+    if re.match(r'^(?:TLS|SSL)[\s_v]*(?:1\.[0-3]|2\.0|3\.0)$', clean, re.I):
+        return True
+    return False
+
+
 def classify_risk_domain(
     algorithm: Optional[str] = None,
     threat_vector: Optional[str] = None,
     title: Optional[str] = None,
     category: Optional[str] = None,
-    default: str = "CLASSICAL",
+    default: str = "UNKNOWN",
 ) -> str:
-    """Deterministically classifies finding risk domain into 'QUANTUM' or 'CLASSICAL'.
+    """Deterministically classifies finding risk domain into 'QUANTUM', 'CLASSICAL', or 'UNKNOWN'.
 
     Evaluation order:
     1. Explicit threat vector mapping (e.g. SHOR, GROVER, SNDL, RESISTANT, POST_QUANTUM -> QUANTUM;
        CLASSICAL_BROKEN -> CLASSICAL).
     2. Central knowledge base lookup via get_algorithm_profile(algorithm).
     3. Structural text pattern matching across title, category, and algorithm.
-    4. Safe fallback to default.
+    4. Safe fallback to default ("UNKNOWN").
     """
     # 1. Threat vector mapping
     if threat_vector:
@@ -585,60 +603,23 @@ def classify_risk_domain(
     combined = f"{algorithm or ''} {title or ''} {category or ''}".upper()
 
     # Broken classical cryptography / implementation flaws
-    if any(
-        c in combined
-        for c in [
-            "3DES",
-            "DES",
-            "MD5",
-            "SHA-1",
-            "SHA1",
-            "RC4",
-            "RC2",
-            "BLOWFISH",
-            "ECB",
-            "NO_SALT",
-            "STATIC_IV",
-            "WEAK_RANDOM",
-            "TLS 1.0",
-            "TLS 1.1",
-            "TLS1.0",
-            "TLS1.1",
-            "EXPIRED",
-            "CLASSICAL_BROKEN",
-            "CLASSICAL_SECURITY",
-        ]
+    if re.search(
+        r'\b(?:3DES|DES|MD5|SHA-?1|RC4|RC2|BLOWFISH|ECB|NO_SALT|STATIC_IV|WEAK_RANDOM|TLS\s*1\.[01]|TLS1\.[01]|EXPIRED|CLASSICAL_BROKEN|CLASSICAL_SECURITY)\b',
+        combined,
     ):
         return "CLASSICAL"
 
     # Quantum threat / PQC indicators
-    if any(
-        q in combined
-        for q in [
-            "SHOR",
-            "GROVER",
-            "SNDL",
-            "PQC",
-            "QUANTUM",
-            "ML-KEM",
-            "ML-DSA",
-            "SLH-DSA",
-            "KYBER",
-            "DILITHIUM",
-            "SPHINCS",
-            "RSA",
-            "ECDH",
-            "ECDSA",
-            "DIFFIE",
-            "X25519",
-            "AES-128",
-            "AES128",
-            "AES-256",
-            "AES256",
-            "CHACHA20",
-        ]
+    if re.search(
+        r'\b(?:SHOR|GROVER|SNDL|PQC|QUANTUM|ML-KEM|ML-DSA|SLH-DSA|KYBER|DILITHIUM|SPHINCS|RSA|ECDH|ECDSA|DIFFIE|X25519|AES-?128|AES-?256|CHACHA20?)\b',
+        combined,
     ):
         return "QUANTUM"
 
+    # Standard classical transport / network protocols
+    if re.search(r'\b(?:TLS|SSL|HTTPS|SSH|KERBEROS|MTLS|IPSEC|VPN)\b', combined):
+        return "CLASSICAL"
+
     return default
+
 
