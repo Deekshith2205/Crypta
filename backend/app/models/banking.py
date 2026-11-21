@@ -132,6 +132,7 @@ class KeyProtectionChain(BaseModel):
     key_wrapping: Optional[str] = Field(default=None, description="Key wrapping / encapsulation algorithm (e.g. RSA-2048, ML-KEM-768)")
     key_storage: Optional[str] = Field(default=None, description="Key storage facility (e.g. HSM, KMS, PLAINTEXT_CONFIGURATION)")
     authentication: Optional[str] = Field(default=None, description="Root/master key authentication algorithm (e.g. ECDSA-P256, RSA-3072)")
+    agility_mode: Optional[str] = Field(default=None, description="Declared agility posture: CONFIGURABLE, MODERATE, HARDCODED")
 
 
 class CryptoConfiguration(BaseModel):

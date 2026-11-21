@@ -98,6 +98,9 @@ class KeyChainAnalysis(BaseModel):
     authentication_algorithm: Optional[str] = Field(default=None)
     primary_migration_dependencies: List[str] = Field(default_factory=list)
     notes: str = Field(default="")
+    agility_score: Optional[int] = Field(default=None, ge=0, le=100, description="Deterministic cryptographic agility score (0-100)")
+    agility_rating: Optional[str] = Field(default=None, description="Agility category: HIGH, MODERATE, LOW, or UNKNOWN")
+    agility_rationale: Optional[str] = Field(default=None, description="Detailed explanation of agility evaluation")
 
 
 class TechnicalRiskContext(BaseModel):
