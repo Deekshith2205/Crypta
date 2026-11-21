@@ -155,5 +155,5 @@ def test_verify_ledger_method(test_setup):
 
     res = svc.verify_ledger()
     assert res.valid is True
-    assert res.status == AuditVerificationStatus.VALID.value
+    assert res.status in (AuditVerificationStatus.VALID.value, AuditVerificationStatus.LOCALLY_VERIFIED.value)
     assert res.records_checked == 3

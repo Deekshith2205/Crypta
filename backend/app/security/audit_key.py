@@ -110,6 +110,29 @@ class AuditKeyManager:
             self._cached_key = key_bytes
             return self._cached_key
 
+        # Check whether an existing ledger already exists before generating a new key
+        ledger_db = self.data_dir / "audit_ledger.db"
+        if ledger_db.exists():
+            import sqlite3
+            try:
+                conn = sqlite3.connect(f"file:{ledger_db}?mode=ro", uri=True)
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM audit_records;")
+                existing_count = cursor.fetchone()[0]
+                conn.close()
+                if existing_count > 0:
+                    raise AuditKeyError(
+                        f"Existing audit ledger database ({ledger_db}) contains {existing_count} records, "
+                        f"but signing key file ({key_file}) is missing and {self._env_var} is not set. "
+                        "Refusing to silently generate an unanchored replacement key."
+                    )
+            except sqlite3.OperationalError:
+                # Table audit_records does not exist yet (clean DB)
+                pass
+            except Exception as e:
+                if isinstance(e, AuditKeyError):
+                    raise
+
         # Generate a new cryptographically secure random key
         new_key = secrets.token_bytes(self.MIN_KEY_BYTES)
         try:
@@ -123,6 +146,36 @@ class AuditKeyManager:
             raise AuditKeyError(f"Failed to persist generated audit signing key to {key_file}: {e}") from e
 
         self._cached_key = new_key
+        return self._cached_key
+
+    def rotate_key(self, new_key: Optional[bytes] = None) -> bytes:
+        """
+        Explicitly rotates the signing key.
+        Archives the current key to `audit_signing.key.prev` and persists the new key.
+        Prevents accidental silent key loss.
+        """
+        key_file = self.data_dir / self.KEY_FILENAME
+        if key_file.exists():
+            archive_file = self.data_dir / f"{self.KEY_FILENAME}.prev"
+            try:
+                archive_file.write_text(key_file.read_text(encoding="utf-8"), encoding="utf-8")
+            except Exception as e:
+                raise AuditKeyError(f"Failed to archive current key during rotation: {e}") from e
+
+        replacement = new_key or secrets.token_bytes(self.MIN_KEY_BYTES)
+        if len(replacement) < self.MIN_KEY_BYTES:
+            raise AuditKeyError(f"New key must be at least {self.MIN_KEY_BYTES} bytes.")
+
+        try:
+            key_file.write_text(replacement.hex(), encoding="utf-8")
+            try:
+                os.chmod(key_file, 0o600)
+            except (AttributeError, OSError):
+                pass
+        except Exception as e:
+            raise AuditKeyError(f"Failed to write new key during rotation: {e}") from e
+
+        self._cached_key = replacement
         return self._cached_key
 
     def sign(self, message: bytes) -> str:

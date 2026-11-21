@@ -684,6 +684,8 @@ export type AuditHeadResponse = {
   chain_valid: boolean;
   status: string;
   checkpoint?: Record<string, unknown> | null;
+  external_anchor?: string;
+  external_checkpoint?: Record<string, unknown> | null;
 };
 
 export type CompleteAssessmentReport = {

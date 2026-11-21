@@ -794,6 +794,8 @@ def get_audit_head_endpoint():
             "chain_valid": verify_res.valid,
             "status": verify_res.status,
             "checkpoint": checkpoint,
+            "external_anchor": verify_res.details.get("external_anchor", "UNCONFIGURED"),
+            "external_checkpoint": verify_res.details.get("external_checkpoint"),
         }
     except Exception as e:
         logger.error(f"Error querying audit head: {str(e)}", exc_info=True)

@@ -86,6 +86,12 @@ def compute_payload_hash(data: Any) -> str:
 
 from app.security.audit_storage import AuditLedgerStorage, DEFAULT_AUDIT_STORAGE, GENESIS_HASH
 from app.security.audit_key import AuditKeyManager, DEFAULT_AUDIT_KEY_MANAGER
+from app.security.external_checkpoint import (
+    BaseCheckpointProvider,
+    TrustedCheckpoint,
+    DEFAULT_EXTERNAL_CHECKPOINT_PROVIDER,
+    CheckpointError,
+)
 
 
 class AuditChainService:
@@ -95,9 +101,11 @@ class AuditChainService:
         self,
         storage: Optional[AuditLedgerStorage] = None,
         key_manager: Optional[AuditKeyManager] = None,
+        checkpoint_provider: Optional[BaseCheckpointProvider] = None,
     ):
         self._storage = storage
         self._key_manager = key_manager if key_manager is not None else DEFAULT_AUDIT_KEY_MANAGER
+        self._checkpoint_provider = checkpoint_provider if checkpoint_provider is not None else DEFAULT_EXTERNAL_CHECKPOINT_PROVIDER
         self._in_memory_fallback: List[AuditRecord] = []
         self._lock = threading.RLock()
 
@@ -396,11 +404,38 @@ class AuditChainService:
             },
         )
 
-    def verify_ledger(self) -> AuditVerificationResult:
+    def create_external_checkpoint(self) -> Optional[TrustedCheckpoint]:
+        """
+        Creates and stores an independently authenticated checkpoint of the current ledger head.
+        Enforces monotonic sequence numbering for replay attack protection.
+        """
+        with self._lock:
+            if self._checkpoint_provider is None or not self._checkpoint_provider.is_configured():
+                return None
+            records = self.get_ledger()
+            head_hash = self.get_latest_hash()
+            count = len(records)
+            prev_chk = self._checkpoint_provider.get_latest_checkpoint()
+            seq = (prev_chk.sequence_number + 1) if prev_chk else 1
+            now_ts = datetime.now(timezone.utc).isoformat()
+
+            chk = TrustedCheckpoint(
+                checkpoint_id=str(uuid.uuid4()),
+                sequence_number=seq,
+                head_hash=head_hash,
+                record_count=count,
+                timestamp=now_ts,
+                provider_type=self._checkpoint_provider.__class__.__name__,
+            )
+            self._checkpoint_provider.save_checkpoint(chk)
+            return chk
+
+    def verify_ledger(self, require_external: bool = False) -> AuditVerificationResult:
         """
         Verifies the full persistent audit ledger:
         1. Validates entire chain sequence continuity from genesis to head.
-        2. Validates stored checkpoints.
+        2. Validates internal SQLite anchor checkpoints.
+        3. Validates independently protected external checkpoints (detecting suffix truncation and rollback).
         """
         try:
             records = self.get_ledger()
@@ -409,7 +444,7 @@ class AuditChainService:
                     valid=True,
                     status=AuditVerificationStatus.VALID.value,
                     records_checked=0,
-                    details={"message": "Audit ledger is empty."},
+                    details={"message": "Audit ledger is empty.", "external_anchor": "EMPTY"},
                 )
 
             chain_res = self.verify_audit_chain(records, check_ledger=False)
@@ -428,7 +463,7 @@ class AuditChainService:
                     details=chain_res.details,
                 )
 
-            # Validate checkpoint if persistent storage is configured
+            # 2. Validate internal SQLite checkpoint if present
             if self._storage is not None and hasattr(self._storage, "get_latest_checkpoint"):
                 chk = self._storage.get_latest_checkpoint()
                 if chk is not None:
@@ -451,14 +486,91 @@ class AuditChainService:
                                 records_checked=len(records),
                             )
 
+            # 3. Validate external independent checkpoint
+            ext_status = "UNCONFIGURED"
+            ext_chk_data = None
+            if self._checkpoint_provider is not None and self._checkpoint_provider.is_configured():
+                try:
+                    ext_chk = self._checkpoint_provider.get_latest_checkpoint()
+                except Exception as e:
+                    if require_external:
+                        return AuditVerificationResult(
+                            valid=False,
+                            status=AuditVerificationStatus.EXTERNAL_ANCHOR_UNAVAILABLE.value,
+                            error=f"External checkpoint provider unavailable: {str(e)}",
+                            records_checked=len(records),
+                        )
+                    ext_status = f"UNAVAILABLE: {str(e)}"
+                    ext_chk = None
+
+                if ext_chk is not None:
+                    ext_chk_data = ext_chk.model_dump(mode="json")
+                    # Check external checkpoint signature authenticity
+                    if not self._checkpoint_provider.verify_signature(ext_chk):
+                        return AuditVerificationResult(
+                            valid=False,
+                            status=AuditVerificationStatus.EXTERNAL_ANCHOR_INVALID.value,
+                            error="External checkpoint signature verification failed.",
+                            records_checked=len(records),
+                            details={"checkpoint": ext_chk_data},
+                        )
+
+                    # Check suffix truncation
+                    if len(records) < ext_chk.record_count:
+                        return AuditVerificationResult(
+                            valid=False,
+                            status=AuditVerificationStatus.LEDGER_SUFFIX_TRUNCATION_DETECTED.value,
+                            error=f"Ledger suffix truncation detected! Stored records ({len(records)}) < external anchor count ({ext_chk.record_count}).",
+                            records_checked=len(records),
+                            details={"external_checkpoint": ext_chk_data},
+                        )
+
+                    # Check rollback / divergence
+                    if ext_chk.record_count > 0:
+                        chk_idx = ext_chk.record_count - 1
+                        if chk_idx < len(records):
+                            rec_at_chk = records[chk_idx]
+                            if not hmac.compare_digest(rec_at_chk.current_hash, ext_chk.head_hash):
+                                return AuditVerificationResult(
+                                    valid=False,
+                                    status=AuditVerificationStatus.LEDGER_ROLLBACK_DETECTED.value,
+                                    error=f"Ledger rollback or chain divergence detected! Record hash {rec_at_chk.current_hash} != external anchor {ext_chk.head_hash}.",
+                                    records_checked=len(records),
+                                    details={"external_checkpoint": ext_chk_data, "divergent_record": rec_at_chk.record_id},
+                                )
+
+                    # If all records up to external checkpoint match, it is externally anchored!
+                    return AuditVerificationResult(
+                        valid=True,
+                        status=AuditVerificationStatus.EXTERNALLY_ANCHORED.value,
+                        records_checked=len(records),
+                        details={
+                            "ledger_length": len(records),
+                            "head_hash": records[-1].current_hash,
+                            "genesis_hash": records[0].previous_hash,
+                            "external_anchor": "VERIFIED",
+                            "external_checkpoint": ext_chk_data,
+                        },
+                    )
+            elif require_external:
+                prov_status = self._checkpoint_provider.get_status() if self._checkpoint_provider else "UNCONFIGURED"
+                return AuditVerificationResult(
+                    valid=False,
+                    status=AuditVerificationStatus.EXTERNAL_ANCHOR_UNAVAILABLE.value,
+                    error=f"External checkpoint anchoring is required but unavailable or unconfigured ({prov_status}).",
+                    records_checked=len(records),
+                )
+
+            # When external provider is not configured:
             return AuditVerificationResult(
                 valid=True,
-                status=AuditVerificationStatus.VALID.value,
+                status=AuditVerificationStatus.LOCALLY_VERIFIED.value,
                 records_checked=len(records),
                 details={
                     "ledger_length": len(records),
                     "head_hash": records[-1].current_hash,
                     "genesis_hash": records[0].previous_hash,
+                    "external_anchor": ext_status,
                 },
             )
         except Exception as e:

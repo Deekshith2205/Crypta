@@ -219,5 +219,5 @@ def test_attack_j_concurrent_append_operations(adversarial_env):
     # Verify complete ledger integrity and continuity
     ledger_res = svc.verify_ledger()
     assert ledger_res.valid is True
-    assert ledger_res.status == AuditVerificationStatus.VALID.value
+    assert ledger_res.status in (AuditVerificationStatus.VALID.value, AuditVerificationStatus.LOCALLY_VERIFIED.value)
     assert ledger_res.records_checked == num_threads

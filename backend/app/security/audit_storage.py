@@ -222,18 +222,21 @@ class AuditLedgerStorage:
         """Retrieves the most recent anchor checkpoint."""
         with self._lock:
             conn = self._get_connection()
-            cursor = conn.execute(
-                "SELECT * FROM audit_checkpoints ORDER BY checkpoint_id DESC LIMIT 1;"
-            )
-            row = cursor.fetchone()
-            if not row:
+            try:
+                cursor = conn.execute(
+                    "SELECT * FROM audit_checkpoints ORDER BY checkpoint_id DESC LIMIT 1;"
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                return {
+                    "checkpoint_id": row["checkpoint_id"],
+                    "head_hash": row["head_hash"],
+                    "record_count": row["record_count"],
+                    "timestamp": row["timestamp"],
+                }
+            except sqlite3.OperationalError:
                 return None
-            return {
-                "checkpoint_id": row["checkpoint_id"],
-                "head_hash": row["head_hash"],
-                "record_count": row["record_count"],
-                "timestamp": row["timestamp"],
-            }
 
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> AuditRecord:

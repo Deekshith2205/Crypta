@@ -415,7 +415,7 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
                 className={`p-2.5 rounded border text-xs ${
                   auditResult.valid
                     ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-                    : auditResult.status === 'RECORD_NOT_IN_LEDGER'
+                    : auditResult.status === 'RECORD_NOT_IN_LEDGER' || auditResult.status === 'EXTERNAL_ANCHOR_UNAVAILABLE' || auditResult.status === 'EXTERNAL_ANCHOR_INVALID'
                     ? 'bg-amber-50/70 border-amber-200 text-amber-900'
                     : 'bg-red-50/70 border-red-200 text-red-900'
                 }`}
@@ -428,8 +428,14 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
                     <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0" />
                   )}
                   <span>
-                    {auditResult.valid
-                      ? 'Cryptographically signed, hash-chained audit record verified'
+                    {auditResult.status === 'EXTERNALLY_ANCHORED'
+                      ? 'Cryptographically signed, externally anchored audit record verified'
+                      : auditResult.valid
+                      ? 'Cryptographically signed audit record verified (Local Ledger)'
+                      : auditResult.status === 'LEDGER_SUFFIX_TRUNCATION_DETECTED'
+                      ? 'CRITICAL ALERT: Ledger suffix truncation detected by external anchor!'
+                      : auditResult.status === 'LEDGER_ROLLBACK_DETECTED'
+                      ? 'CRITICAL ALERT: Ledger rollback / chain divergence detected!'
                       : `Audit verification alert: ${auditResult.error || 'Integrity check unsuccessful'}`}
                   </span>
                 </div>
@@ -457,6 +463,12 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
                     <span className="font-sans font-medium text-slate-500">Ledger Membership: </span>
                     <span className={auditResult.status === 'RECORD_NOT_IN_LEDGER' ? 'text-amber-700 font-bold' : auditResult.valid ? 'text-emerald-700' : 'text-slate-600'}>
                       {auditResult.status === 'RECORD_NOT_IN_LEDGER' ? 'NOT IN LEDGER' : auditResult.valid ? 'Verified in Ledger' : 'Unconfirmed'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-sans font-medium text-slate-500">External Anchor: </span>
+                    <span className={auditResult.status === 'EXTERNALLY_ANCHORED' ? 'text-emerald-700 font-semibold' : auditResult.status === 'LEDGER_SUFFIX_TRUNCATION_DETECTED' || auditResult.status === 'LEDGER_ROLLBACK_DETECTED' ? 'text-red-600 font-bold' : 'text-slate-600'}>
+                      {auditResult.status === 'EXTERNALLY_ANCHORED' ? 'Verified External Anchor' : auditResult.status === 'LEDGER_SUFFIX_TRUNCATION_DETECTED' ? 'TRUNCATION DETECTED' : auditResult.status === 'LEDGER_ROLLBACK_DETECTED' ? 'ROLLBACK DETECTED' : 'Local Verification Only'}
                     </span>
                   </div>
                 </div>

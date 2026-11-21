@@ -98,3 +98,43 @@ def test_key_never_exposed_in_repr_or_str(tmp_path):
     assert key_hex not in str_rep
     assert key_hex not in repr_rep
     assert "REDACTED" in str_rep or "AuditKeyManager" in str_rep
+
+
+def test_key_rotation_and_archiving(tmp_path):
+    """rotate_key archives the old key and writes the new key."""
+    mgr = AuditKeyManager(data_dir=tmp_path)
+    old_key = mgr.get_key()
+
+    new_key = mgr.rotate_key()
+    assert new_key != old_key
+    assert len(new_key) >= 32
+
+    # Check archive
+    archive_file = tmp_path / "audit_signing.key.prev"
+    assert archive_file.exists()
+    assert bytes.fromhex(archive_file.read_text().strip()) == old_key
+
+    # Current key is updated
+    key_file = tmp_path / "audit_signing.key"
+    assert bytes.fromhex(key_file.read_text().strip()) == new_key
+
+
+def test_missing_key_refuses_silent_regeneration_when_ledger_exists(tmp_path):
+    """If audit_records exist in ledger DB but key file is missing, refuse silent regeneration."""
+    import sqlite3
+    db_file = tmp_path / "audit_ledger.db"
+    conn = sqlite3.connect(str(db_file))
+    with conn:
+        conn.execute("""
+            CREATE TABLE audit_records (
+                sequence_number INTEGER PRIMARY KEY AUTOINCREMENT,
+                record_id TEXT UNIQUE NOT NULL
+            );
+        """)
+        conn.execute("INSERT INTO audit_records (record_id) VALUES ('existing-rec-01');")
+    conn.close()
+
+    mgr = AuditKeyManager(data_dir=tmp_path)
+    with pytest.raises(AuditKeyError) as exc_info:
+        mgr.get_key()
+    assert "refusing to silently generate" in str(exc_info.value).lower()
