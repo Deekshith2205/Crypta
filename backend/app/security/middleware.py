@@ -5,6 +5,7 @@ Provides:
 - SecurityHeadersMiddleware: Attaches standard security headers and endpoint-specific cache controls.
 """
 
+import hmac
 import os
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Scope, Receive, Send
@@ -129,3 +130,84 @@ class SecurityHeadersMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
+
+
+def get_configured_api_key() -> str:
+    """Returns the configured API key from QS_API_KEY or API_KEY environment variable.
+
+    Returns empty string if unset.
+    """
+    return (os.environ.get("QS_API_KEY", os.environ.get("API_KEY", "")) or "").strip()
+
+
+def verify_api_key(provided_key: str, expected_key: str) -> bool:
+    """Performs constant-time comparison of the provided API key against expected key."""
+    if not provided_key or not expected_key:
+        return False
+    return hmac.compare_digest(provided_key.encode("utf-8"), expected_key.encode("utf-8"))
+
+
+class ApiKeyAuthMiddleware:
+    """Enforces optional API-key authentication when QS_API_KEY / API_KEY is configured.
+
+    - When unset: all endpoints remain open (demo/local dev mode).
+    - When set: requires X-API-Key header on all /api/* endpoints except /api/health.
+    - Missing key -> HTTP 401 UNAUTHORIZED ('API key required.').
+    - Invalid key -> HTTP 401 UNAUTHORIZED ('Invalid API key.').
+    - CORS preflight OPTIONS requests are allowed through.
+    """
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        expected_key = get_configured_api_key()
+        if not expected_key:
+            # Authentication disabled
+            await self.app(scope, receive, send)
+            return
+
+        # Allow CORS preflight requests
+        if scope.get("method") == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        # /api/health and non-api routes remain open for liveness/docs
+        if not path.startswith("/api/") or path == "/api/health":
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(raw=scope.get("headers", []))
+        provided_key = headers.get("x-api-key")
+
+        if not provided_key:
+            await self._send_401(send, "API key required.")
+            return
+
+        if not verify_api_key(provided_key, expected_key):
+            await self._send_401(send, "Invalid API key.")
+            return
+
+        await self.app(scope, receive, send)
+
+    async def _send_401(self, send: Send, detail: str) -> None:
+        body = (
+            f'{{"error":"UNAUTHORIZED","detail":"{detail}"}}'
+        ).encode("utf-8")
+        await send({
+            "type": "http.response.start",
+            "status": 401,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode("ascii")),
+            ],
+        })
+        await send({
+            "type": "http.response.body",
+            "body": body,
+        })
