@@ -30,6 +30,7 @@ from app.ai.providers.base import (
 )
 from app.ai.providers.factory import get_ai_provider
 from app.ai.sanitization import sanitize_dict_fields, sanitize_text
+from app.ai.validation import validate_ai_explanation
 from app.ai.schemas import (
     AIStatusResponse,
     AIExplanationResult,
@@ -212,6 +213,25 @@ class QuantumReadinessAIService:
 
             # Validate against the strict Pydantic response model.
             parsed_data = response_model.model_validate(json_dict)
+
+            # Deterministic trust validation (Task D2)
+            validation_result = validate_ai_explanation(
+                output=parsed_data,
+                deterministic_context=input_data,
+            )
+            if not validation_result.is_valid:
+                logger.warning(
+                    "AI explanation rejected due to trust validation failure: %s",
+                    validation_result.violations,
+                )
+                return AIExplanationResult[M](
+                    success=False,
+                    is_available=True,
+                    provider=self._provider.provider_name,
+                    data=None,
+                    error=f"AI output failed deterministic trust validation: {'; '.join(validation_result.violations)}",
+                    disclaimer=DEFAULT_ADVISORY_DISCLAIMER,
+                )
 
             # The disclaimer is application-controlled, not AI-controlled.
             if hasattr(parsed_data, "advisory_disclaimer"):
