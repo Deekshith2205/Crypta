@@ -11,6 +11,16 @@ import type {
   CompleteAssessmentReport,
   ArtifactFindingsResponse,
   UploadedCertificateResponse,
+  AIStatus,
+  AIExplanationResult,
+  FindingExplanationRequest,
+  FindingExplanationResponse,
+  BankingRiskExplanationRequest,
+  BankingRiskExplanationResponse,
+  MigrationAdvisoryRequest,
+  MigrationAdvisoryResponse,
+  ReportExplanationRequest,
+  ReportExplanationResponse,
 } from '../types/scan';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -33,7 +43,7 @@ export async function scanDomain(
       },
       body: JSON.stringify(payload),
     });
-  } catch (err: any) {
+  } catch {
     // If proxied fetch failed (e.g. backend running on :8000 directly), retry direct URL
     try {
       response = await fetch('http://127.0.0.1:8000/api/scan', {
@@ -68,7 +78,7 @@ export async function getBankingProfiles(): Promise<BankingSystemProfile[]> {
   let response: Response;
   try {
     response = await fetch(url);
-  } catch (err: any) {
+  } catch {
     try {
       response = await fetch('http://127.0.0.1:8000/api/banking/profiles');
     } catch {
@@ -89,7 +99,7 @@ export async function getBankingProfileById(id: string): Promise<BankingSystemPr
   let response: Response;
   try {
     response = await fetch(url);
-  } catch (err: any) {
+  } catch {
     try {
       response = await fetch(`http://127.0.0.1:8000/api/banking/profiles/${encodeURIComponent(id)}`);
     } catch {
@@ -110,7 +120,7 @@ export async function getBankingRiskRankings(): Promise<BankingRiskAssessment[]>
   let response: Response;
   try {
     response = await fetch(url);
-  } catch (err: any) {
+  } catch {
     try {
       response = await fetch('http://127.0.0.1:8000/api/banking/risk');
     } catch {
@@ -154,7 +164,7 @@ export async function getBankingProfileRisk(id: string): Promise<BankingRiskAsse
   let response: Response;
   try {
     response = await fetch(url);
-  } catch (err: any) {
+  } catch {
     try {
       response = await fetch(`http://127.0.0.1:8000/api/banking/profiles/${encodeURIComponent(id)}/risk`);
     } catch {
@@ -183,7 +193,7 @@ export async function simulateMigration(
       },
       body: JSON.stringify(request),
     });
-  } catch (err: any) {
+  } catch {
     try {
       response = await fetch('http://127.0.0.1:8000/api/banking/risk/what-if', {
         method: 'POST',
@@ -230,7 +240,7 @@ export async function checkBackendHealth(): Promise<boolean> {
 export async function getBankingSystemJsonReport(
   systemId: string
 ): Promise<CompleteAssessmentReport> {
-  const path = `/api/banking/systems/${encodeURIComponent(systemId)}/report/json`;
+  const path = `/api/banking/systems/${encodeURIComponent(systemId)}/report/json?include_ai=true`;
 
   let response: Response;
 
@@ -257,7 +267,7 @@ export async function getBankingSystemJsonReport(
 export async function getBankingSystemPdfReport(
   systemId: string
 ): Promise<Blob> {
-  const path = `/api/banking/systems/${encodeURIComponent(systemId)}/report/pdf`;
+  const path = `/api/banking/systems/${encodeURIComponent(systemId)}/report/pdf?include_ai=true`;
 
   let response: Response;
 
@@ -422,5 +432,108 @@ export async function scanUploadedCertificate(
     '/api/scan/cert',
     uploadedFiles[0],
     'Certificate scan'
+  );
+}
+
+// ==============================================================================
+// TASK 10: AI-POWERED QUANTUM READINESS INTELLIGENCE API CLIENT
+// ==============================================================================
+
+async function postAIJson<T>(endpoint: string, payload: unknown, fallbackMessage: string): Promise<T> {
+  const url = `${API_BASE}${endpoint}`;
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    try {
+      response = await fetch(`http://127.0.0.1:8000${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch {
+      throw new Error(fallbackMessage);
+    }
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || errorData.error || `Request failed with HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function getAIStatus(): Promise<AIStatus> {
+  const url = `${API_BASE}/api/ai/status`;
+  let response: Response;
+
+  try {
+    response = await fetch(url);
+  } catch {
+    try {
+      response = await fetch('http://127.0.0.1:8000/api/ai/status');
+    } catch {
+      return {
+        is_available: false,
+        provider: 'none',
+        message: 'Unable to connect to QuantumShield AI service.',
+      };
+    }
+  }
+
+  if (!response.ok) {
+    return {
+      is_available: false,
+      provider: 'none',
+      message: `AI service status returned HTTP ${response.status}`,
+    };
+  }
+
+  return response.json();
+}
+
+export async function explainFinding(
+  payload: FindingExplanationRequest
+): Promise<AIExplanationResult<FindingExplanationResponse>> {
+  return postAIJson<AIExplanationResult<FindingExplanationResponse>>(
+    '/api/ai/explain/finding',
+    payload,
+    'Failed to contact AI service for finding explanation.'
+  );
+}
+
+export async function explainBankingRisk(
+  payload: BankingRiskExplanationRequest
+): Promise<AIExplanationResult<BankingRiskExplanationResponse>> {
+  return postAIJson<AIExplanationResult<BankingRiskExplanationResponse>>(
+    '/api/ai/explain/banking-risk',
+    payload,
+    'Failed to contact AI service for banking risk explanation.'
+  );
+}
+
+export async function adviseMigration(
+  payload: MigrationAdvisoryRequest
+): Promise<AIExplanationResult<MigrationAdvisoryResponse>> {
+  return postAIJson<AIExplanationResult<MigrationAdvisoryResponse>>(
+    '/api/ai/advisory/migration',
+    payload,
+    'Failed to contact AI service for migration advisory.'
+  );
+}
+
+export async function explainReport(
+  payload: ReportExplanationRequest
+): Promise<AIExplanationResult<ReportExplanationResponse>> {
+  return postAIJson<AIExplanationResult<ReportExplanationResponse>>(
+    '/api/ai/explain/report',
+    payload,
+    'Failed to contact AI service for report explanation.'
   );
 }

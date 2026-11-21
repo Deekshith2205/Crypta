@@ -119,7 +119,8 @@ def test_config_scanner_on_manifest_content():
     """Direct scanner test on server configuration manifests."""
     from pathlib import Path
     scanner = BankingConfigScanner()
-    inv = scanner.scan_directory(Path("backend/sample_data/banking/net_banking"))
+    fixture_dir = Path(__file__).resolve().parents[1] / "sample_data" / "banking" / "net_banking"
+    inv = scanner.scan_directory(fixture_dir)
     assert len(inv.observations) > 0
     for obs in inv.observations:
         assert obs.file.endswith(".conf") or obs.file.endswith(".yaml")

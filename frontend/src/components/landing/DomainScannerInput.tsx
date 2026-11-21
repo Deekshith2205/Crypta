@@ -1,5 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { Globe, ArrowRight, Loader2, SlidersHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
+
+import React, { useState } from 'react';
+import {
+  Globe,
+  ArrowRight,
+  Loader2,
+  SlidersHorizontal,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 
 interface DomainScannerInputProps {
   onScan: (domain: string, port: number, probePqc?: boolean, assetId?: string) => void;
@@ -18,11 +26,26 @@ const EXAMPLE_DOMAINS = [
 
 const BANKING_PROFILES = [
   { id: '', label: 'Auto-infer profile from target domain' },
-  { id: 'BANK-PROF-PAYMENT-GATEWAY', label: 'Modern Payment Gateway (Critical / PQC Hybrid / HSM)' },
-  { id: 'BANK-PROF-CORE-BANKING', label: 'Legacy Core Banking (Critical / RSA-2048 / Mainframe)' },
-  { id: 'BANK-PROF-KYC-DB', label: 'Customer / KYC Database (Critical / Long SNDL / HSM)' },
-  { id: 'BANK-PROF-NET-BANKING', label: 'Net Banking Portal (High / Web Banking / TLS 1.3)' },
-  { id: 'BANK-PROF-ATM-NETWORK', label: 'ATM Network (High / 3DES / Dedicated Hardware)' },
+  {
+    id: 'BANK-PROF-PAYMENT-GATEWAY',
+    label: 'Modern Payment Gateway (Critical / PQC Hybrid / HSM)',
+  },
+  {
+    id: 'BANK-PROF-CORE-BANKING',
+    label: 'Legacy Core Banking (Critical / RSA-2048 / Mainframe)',
+  },
+  {
+    id: 'BANK-PROF-KYC-DB',
+    label: 'Customer / KYC Database (Critical / Long SNDL / HSM)',
+  },
+  {
+    id: 'BANK-PROF-NET-BANKING',
+    label: 'Net Banking Portal (High / Web Banking / TLS 1.3)',
+  },
+  {
+    id: 'BANK-PROF-ATM-NETWORK',
+    label: 'ATM Network (High / 3DES / Dedicated Hardware)',
+  },
 ];
 
 export const DomainScannerInput: React.FC<DomainScannerInputProps> = ({
@@ -33,35 +56,55 @@ export const DomainScannerInput: React.FC<DomainScannerInputProps> = ({
   className = '',
 }) => {
   const [domain, setDomain] = useState(currentDomain);
-  const [port, setPort] = useState(443);
+  const [port] = useState(443);
   const [probePqc, setProbePqc] = useState(false);
   const [assetId, setAssetId] = useState(initialAssetId);
+  const [previousInitialAssetId, setPreviousInitialAssetId] =
+    useState(initialAssetId);
+  const [previousCurrentDomain, setPreviousCurrentDomain] =
+    useState(currentDomain);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  useEffect(() => {
+  // Synchronize incoming profile changes without an effect.
+  if (initialAssetId !== previousInitialAssetId) {
+    setPreviousInitialAssetId(initialAssetId);
+
     if (initialAssetId) {
       setAssetId(initialAssetId);
     }
-  }, [initialAssetId]);
+  }
 
-  useEffect(() => {
+  // Synchronize incoming domain changes without an effect.
+  if (currentDomain !== previousCurrentDomain) {
+    setPreviousCurrentDomain(currentDomain);
+
     if (currentDomain) {
       setDomain(currentDomain);
     }
-  }, [currentDomain]);
+  }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
     const trimmed = domain.trim();
+
     if (trimmed && !isLoading) {
       onScan(trimmed, port, probePqc, assetId || undefined);
     }
   };
 
-  const handleSelectExample = (exampleDomain: string, exampleAssetId?: string) => {
+  const handleSelectExample = (
+    exampleDomain: string,
+    exampleAssetId?: string,
+  ) => {
     setDomain(exampleDomain);
+
     const chosenAsset = exampleAssetId || assetId;
-    if (exampleAssetId) setAssetId(exampleAssetId);
+
+    if (exampleAssetId) {
+      setAssetId(exampleAssetId);
+    }
+
     onScan(exampleDomain, 443, probePqc, chosenAsset || undefined);
   };
 
@@ -72,7 +115,10 @@ export const DomainScannerInput: React.FC<DomainScannerInputProps> = ({
         <div className="flex items-center w-full h-[52px] bg-white rounded-[10px] border border-slate-200 shadow-[0_1px_4px_rgba(0,0,0,0.03)] focus-within:border-[#5755D9] focus-within:ring-2 focus-within:ring-[#5755D9]/10 transition-all pl-3.5 pr-1.5">
           {/* Globe Icon */}
           <div className="text-slate-400 shrink-0 mr-2.5">
-            <Globe className="w-4 h-4 text-slate-400" strokeWidth={1.8} />
+            <Globe
+              className="w-4 h-4 text-slate-400"
+              strokeWidth={1.8}
+            />
           </div>
 
           {/* Text Input */}
@@ -109,12 +155,17 @@ export const DomainScannerInput: React.FC<DomainScannerInputProps> = ({
 
       {/* Example Domains Tag Pills */}
       <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-        <span className="text-[12.5px] text-slate-500 font-normal mr-1">Try examples:</span>
+        <span className="text-[12.5px] text-slate-500 font-normal mr-1">
+          Try examples:
+        </span>
+
         {EXAMPLE_DOMAINS.map((item) => (
           <button
             key={item.domain}
             type="button"
-            onClick={() => handleSelectExample(item.domain, item.assetId)}
+            onClick={() =>
+              handleSelectExample(item.domain, item.assetId)
+            }
             disabled={isLoading}
             className="text-[11.5px] font-normal px-2.5 py-0.5 rounded-full bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#4B5563] hover:text-[#0F172A] border border-slate-200/50 transition-colors cursor-pointer disabled:opacity-50 font-mono"
           >
@@ -130,7 +181,11 @@ export const DomainScannerInput: React.FC<DomainScannerInputProps> = ({
         >
           <SlidersHorizontal className="w-3 h-3" />
           <span>{showAdvanced ? 'Hide Options' : 'Options'}</span>
-          {showAdvanced ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          {showAdvanced ? (
+            <ChevronUp className="w-3 h-3" />
+          ) : (
+            <ChevronDown className="w-3 h-3" />
+          )}
         </button>
       </div>
 
@@ -141,15 +196,16 @@ export const DomainScannerInput: React.FC<DomainScannerInputProps> = ({
             <label className="text-[11.5px] font-medium text-slate-600">
               Banking Profile Context:
             </label>
+
             <select
               value={assetId}
               onChange={(e) => setAssetId(e.target.value)}
               disabled={isLoading}
               className="w-full sm:w-auto px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-800 text-xs focus:outline-none cursor-pointer max-w-xs truncate"
             >
-              {BANKING_PROFILES.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
+              {BANKING_PROFILES.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.label}
                 </option>
               ))}
             </select>
@@ -159,6 +215,7 @@ export const DomainScannerInput: React.FC<DomainScannerInputProps> = ({
             <span className="text-[11.5px] text-slate-600">
               Active Hybrid PQC Probe (ML-KEM):
             </span>
+
             <input
               type="checkbox"
               checked={probePqc}

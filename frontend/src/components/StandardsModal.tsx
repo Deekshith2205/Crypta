@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, BookOpen, ExternalLink, ShieldCheck } from 'lucide-react';
+import { X, BookOpen } from 'lucide-react';
 
 interface StandardsModalProps {
   isOpen: boolean;

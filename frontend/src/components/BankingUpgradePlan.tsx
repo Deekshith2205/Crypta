@@ -1,5 +1,6 @@
+
 import React, { useEffect, useState } from 'react';
-import type { RankedUpgradePlan } from '../types/scan';
+import type { RankedUpgradePlan, RankedUpgradeItem } from '../types/scan';
 import { getBankingUpgradePlan } from '../services/api';
 import {
   AlertTriangle,
@@ -8,8 +9,9 @@ import {
   Info,
   Loader2,
   TrendingUp,
+  Sparkles,
 } from 'lucide-react';
-
+import { AIMigrationAdvisorModal } from './ai/AIMigrationAdvisorModal';
 
 export const BankingUpgradePlan: React.FC = () => {
   const [plan, setPlan] = useState<RankedUpgradePlan | null>(null);
@@ -17,12 +19,10 @@ export const BankingUpgradePlan: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [advisoryItem, setAdvisoryItem] = useState<RankedUpgradeItem | null>(null);
 
   useEffect(() => {
     let isMounted = true;
-
-    setIsLoading(true);
-    setError(null);
 
     getBankingUpgradePlan()
       .then((data) => {
@@ -40,7 +40,9 @@ export const BankingUpgradePlan: React.FC = () => {
         }
       })
       .finally(() => {
-        if (isMounted) setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       });
 
     return () => {
@@ -105,14 +107,19 @@ export const BankingUpgradePlan: React.FC = () => {
             </div>
             <div className="text-rose-700 mt-0.5">{error}</div>
             <button
-                onClick={() => setRetryCount((count) => count + 1)}
-                className="mt-3 px-3 py-1.5 rounded-lg bg-white border border-rose-200 text-rose-700 hover:bg-rose-100 font-semibold cursor-pointer"
+              onClick={() => {
+                setError(null);
+                setIsLoading(true);
+                setRetryCount((count) => count + 1);
+              }}
+              className="mt-3 px-3 py-1.5 rounded-lg bg-white border border-rose-200 text-rose-700 hover:bg-rose-100 font-semibold cursor-pointer"
             >
-            Retry loading upgrade plan
+              Retry loading upgrade plan
             </button>
           </div>
         </div>
       )}
+
       {!isLoading && !error && plan && (
         <div className="space-y-5">
           {/* Priority Summary */}
@@ -338,6 +345,7 @@ export const BankingUpgradePlan: React.FC = () => {
                             </div>
                           ))}
                         </div>
+
                         <div className="mt-2 p-3 rounded-lg bg-indigo-50 border border-indigo-100">
                           <div className="text-[10px] text-indigo-700">
                             Weighted business exposure factor
@@ -397,6 +405,7 @@ export const BankingUpgradePlan: React.FC = () => {
                       <p className="text-xs text-slate-700 leading-relaxed">
                         {item.recommended_migration}
                       </p>
+
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                           <div className="text-[10px] uppercase font-mono text-slate-500">
@@ -414,6 +423,21 @@ export const BankingUpgradePlan: React.FC = () => {
                             {item.estimated_migration_complexity}
                           </p>
                         </div>
+                      </div>
+
+                      {/* AI Migration Advisory Trigger */}
+                      <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                        <span className="text-[11px] text-slate-500 font-mono">
+                          NIST FIPS 203/204/205 transition roadmap guidance
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setAdvisoryItem(item)}
+                          className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-[#5755D9] hover:bg-indigo-100 text-xs font-semibold transition cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-[#5755D9]" />
+                          <span>AI Migration Advisory</span>
+                        </button>
                       </div>
                     </div>
 
@@ -460,6 +484,20 @@ export const BankingUpgradePlan: React.FC = () => {
             );
           })}
         </div>
+      )}
+
+      {/* AI Migration Advisor Modal */}
+      {advisoryItem && (
+        <AIMigrationAdvisorModal
+          isOpen={!!advisoryItem}
+          onClose={() => setAdvisoryItem(null)}
+          systemId={advisoryItem.system_id}
+          systemName={advisoryItem.system_name}
+          baselineScore={advisoryItem.priority_score}
+          baselineBand={advisoryItem.priority}
+          targetPrimitive={advisoryItem.recommended_migration}
+          upgradeItem={advisoryItem}
+        />
       )}
     </div>
   );

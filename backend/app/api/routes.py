@@ -26,6 +26,19 @@ from app.scanners.domain_validator import DomainValidationError
 from app.security.network import UnsafeTargetError, DnsResolutionError
 from app.security.rate_limiter import DEFAULT_RATE_LIMITER, SCAN_SEMAPHORE, MAX_CONCURRENT_SCANS
 from app.scanners.tls_scanner import TlsScanError, TlsTimeoutError, TlsConnectionError
+from app.ai.service import DEFAULT_AI_SERVICE
+from app.ai.schemas import (
+    AIStatusResponse,
+    AIExplanationResult,
+    FindingExplanationRequest,
+    FindingExplanationResponse,
+    BankingRiskExplanationRequest,
+    BankingRiskExplanationResponse,
+    MigrationAdvisoryRequest,
+    MigrationAdvisoryResponse,
+    ReportExplanationRequest,
+    ReportExplanationResponse,
+)
 
 logger = logging.getLogger("quantumshield.api")
 router = APIRouter()
@@ -476,10 +489,11 @@ def get_system_cbom(system_id: str):
 
 
 @router.get("/banking/systems/{system_id}/report/json", tags=["Reports & Auditability"])
-def get_system_json_report(system_id: str):
+async def get_system_json_report(system_id: str, include_ai: bool = False):
     """
     Returns a comprehensive, machine-readable post-quantum assessment report
     sealed with a cryptographic audit hash chain record.
+    Optionally enriches with AI report explanation when include_ai=True and provider is configured.
     """
     from app.services.report_service import build_complete_json_report
     from app.models.profiles import get_synthetic_profile_by_id
@@ -489,15 +503,26 @@ def get_system_json_report(system_id: str):
             content={"error": "PROFILE_NOT_FOUND", "detail": f"Banking system '{system_id}' not found."},
         )
     report = build_complete_json_report(system_id)
+    if include_ai and DEFAULT_AI_SERVICE.provider.is_configured():
+        try:
+            ai_res = await DEFAULT_AI_SERVICE.explain_report(
+                ReportExplanationRequest(system_id=system_id),
+                report_context=report.model_dump(),
+            )
+            if ai_res.success and ai_res.data:
+                report.ai_advisory = ai_res.data.model_dump()
+        except Exception:
+            logger.warning("Failed to attach AI advisory to JSON report for %s", system_id, exc_info=True)
     return report.model_dump()
 
 
 @router.get("/banking/systems/{system_id}/report/pdf", tags=["Reports & Auditability"])
-def get_system_pdf_report(system_id: str):
+async def get_system_pdf_report(system_id: str, include_ai: bool = False):
     """
     Generates and returns an executive-grade, professional PDF audit report.
+    Optionally enriches with AI report explanation when include_ai=True and provider is configured.
     """
-    from app.services.report_service import generate_pdf_report
+    from app.services.report_service import generate_pdf_report, build_complete_json_report
     from app.models.profiles import get_synthetic_profile_by_id
     from fastapi import Response
     if not get_synthetic_profile_by_id(system_id):
@@ -505,7 +530,18 @@ def get_system_pdf_report(system_id: str):
             status_code=status.HTTP_404_NOT_FOUND,
             content={"error": "PROFILE_NOT_FOUND", "detail": f"Banking system '{system_id}' not found."},
         )
-    pdf_bytes = generate_pdf_report(system_id)
+    report = build_complete_json_report(system_id)
+    if include_ai and DEFAULT_AI_SERVICE.provider.is_configured():
+        try:
+            ai_res = await DEFAULT_AI_SERVICE.explain_report(
+                ReportExplanationRequest(system_id=system_id),
+                report_context=report.model_dump(),
+            )
+            if ai_res.success and ai_res.data:
+                report.ai_advisory = ai_res.data.model_dump()
+        except Exception:
+            logger.warning("Failed to attach AI advisory to PDF report for %s", system_id, exc_info=True)
+    pdf_bytes = generate_pdf_report(system_id, report=report)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -978,3 +1014,82 @@ def scan_uploaded_certificate(payload: CertificateScanRequest):
                 "detail": "The certificate scan could not be completed.",
             },
         )
+
+
+# ============================================================================
+# Task 10: AI-Powered Quantum Readiness Intelligence Endpoints
+# AI FOR REASONING. CODE FOR CORRECTNESS.
+# ============================================================================
+
+@router.get("/ai/status", response_model=AIStatusResponse, tags=["AI Readiness Intelligence"])
+def get_ai_status():
+    """Returns the current operational status of the AI intelligence layer."""
+    return DEFAULT_AI_SERVICE.get_status()
+
+
+@router.post(
+    "/ai/explain/finding",
+    response_model=AIExplanationResult[FindingExplanationResponse],
+    tags=["AI Readiness Intelligence"],
+)
+async def explain_finding_endpoint(payload: FindingExplanationRequest):
+    """
+    Generates an AI-powered contextual explanation for an individual scanner finding.
+    Grounded strictly in verified evidence; preserves NOT_OBSERVABLE != VULNERABLE.
+    """
+    return await DEFAULT_AI_SERVICE.explain_finding(payload)
+
+
+@router.post(
+    "/ai/explain/banking-risk",
+    response_model=AIExplanationResult[BankingRiskExplanationResponse],
+    tags=["AI Readiness Intelligence"],
+)
+async def explain_banking_risk_endpoint(payload: BankingRiskExplanationRequest):
+    """
+    Explains the deterministic factors behind a banking system's risk score and upgrade queue placement.
+    Never recalculates or modifies the deterministic score or priority ranking.
+    """
+    return await DEFAULT_AI_SERVICE.explain_banking_risk(payload)
+
+
+@router.post(
+    "/ai/advisory/migration",
+    response_model=AIExplanationResult[MigrationAdvisoryResponse],
+    tags=["AI Readiness Intelligence"],
+)
+async def advise_migration_endpoint(payload: MigrationAdvisoryRequest):
+    """
+    AI migration advisor providing architectural guidance, operational considerations,
+    and phased migration milestones based on deterministic upgrade plan data.
+    """
+    return await DEFAULT_AI_SERVICE.advise_migration(payload)
+
+
+@router.post(
+    "/ai/explain/report",
+    response_model=AIExplanationResult[ReportExplanationResponse],
+    tags=["AI Readiness Intelligence"],
+)
+async def explain_report_endpoint(payload: ReportExplanationRequest):
+    """
+    Generates executive and technical narrative summaries for a banking assessment report.
+    Content is strictly marked as advisory and informational.
+    """
+    from app.models.profiles import get_synthetic_profile_by_id
+    from app.services.report_service import build_complete_json_report
+
+    profile = get_synthetic_profile_by_id(payload.system_id)
+    if not profile:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={
+                "error": "PROFILE_NOT_FOUND",
+                "detail": f"Banking system '{payload.system_id}' not found.",
+            },
+        )
+
+    rep = build_complete_json_report(payload.system_id)
+    report_context = rep.model_dump()
+
+    return await DEFAULT_AI_SERVICE.explain_report(payload, report_context=report_context)

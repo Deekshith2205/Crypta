@@ -1,6 +1,6 @@
 import React from 'react';
 import type { BankingAsset } from '../types/scan';
-import { Landmark, ShieldAlert, Network, Clock, Eye, Layers } from 'lucide-react';
+import { Landmark, ShieldAlert, Network, Clock, Layers } from 'lucide-react';
 
 interface BankingAssetCardProps {
   asset: BankingAsset;

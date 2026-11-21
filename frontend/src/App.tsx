@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+
+import { useState } from 'react';
 import { Header } from './components/landing/Header';
 import { HomePage } from './components/landing/HomePage';
 import { BankingSystemsCatalog } from './components/BankingSystemsCatalog';
@@ -7,7 +8,7 @@ import { WhatIfSimulator } from './components/WhatIfSimulator';
 import { StandardsModal } from './components/StandardsModal';
 import { JsonExportModal } from './components/JsonExportModal';
 import type { ScanResponse } from './types/scan';
-import { scanDomain, checkBackendHealth } from './services/api';
+import { scanDomain } from './services/api';
 import { Shield } from 'lucide-react';
 import { BankingUpgradePlan } from './components/BankingUpgradePlan';
 
@@ -15,18 +16,16 @@ export function App() {
   const [activeView, setActiveView] = useState<
     'scanner' | 'catalog' | 'risk' | 'simulator' | 'upgrade-plan'
   >('scanner');
+
   const [selectedAssetId, setSelectedAssetId] = useState<string>('');
-  const [simulatorAssetId, setSimulatorAssetId] = useState<string>('BANK-PROF-CORE-BANKING');
+  const [simulatorAssetId, setSimulatorAssetId] = useState<string>(
+    'BANK-PROF-CORE-BANKING'
+  );
   const [scanData, setScanData] = useState<ScanResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [backendOnline, setBackendOnline] = useState<boolean>(true);
   const [standardsModalOpen, setStandardsModalOpen] = useState<boolean>(false);
   const [exportModalOpen, setExportModalOpen] = useState<boolean>(false);
-
-  useEffect(() => {
-    checkBackendHealth().then(setBackendOnline);
-  }, []);
 
   const handleScan = async (
     domain: string,
@@ -36,22 +35,35 @@ export function App() {
   ) => {
     setIsLoading(true);
     setErrorMessage(null);
+
     if (assetId !== undefined) {
       setSelectedAssetId(assetId);
     }
 
     try {
-      const result = await scanDomain(domain, port, probePqc, assetId || selectedAssetId || undefined);
+      const result = await scanDomain(
+        domain,
+        port,
+        probePqc,
+        assetId || selectedAssetId || undefined
+      );
+
       setScanData(result);
-      setBackendOnline(true);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'An unexpected error occurred during scan.');
+    } catch (err: unknown) {
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : 'An unexpected error occurred during scan.'
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleAuditFromCatalog = (profileId: string, suggestedDomain: string = 'api.chase.com') => {
+  const handleAuditFromCatalog = (
+    profileId: string,
+    suggestedDomain: string = 'api.chase.com'
+  ) => {
     setSelectedAssetId(profileId);
     setActiveView('scanner');
     handleScan(suggestedDomain, 443, false, profileId);
@@ -64,14 +76,20 @@ export function App() {
 
   const handleGetStarted = () => {
     setActiveView('scanner');
+
     setTimeout(() => {
       const input = document.getElementById('domain-scanner-input');
+
       if (input) {
         input.focus();
-        input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        input.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        });
       }
     }, 50);
   };
+
   return (
     <div className="min-h-screen bg-[#FCFCFA] text-slate-900 flex flex-col selection:bg-[#5755D9]/20 selection:text-[#5755D9]">
       {/* 1. Recreated Reference Header */}
@@ -123,7 +141,6 @@ export function App() {
             errorMessage={errorMessage}
             onSelectView={setActiveView}
             onOpenSimulator={handleOpenSimulator}
-            onAuditProfile={handleAuditFromCatalog}
           />
         )}
       </main>
@@ -147,13 +164,18 @@ export function App() {
             <div className="w-5 h-5 rounded-md bg-[#F4F3FF] border border-[#5755D9]/30 flex items-center justify-center text-[#5755D9]">
               <Shield className="w-3 h-3 text-[#5755D9]" />
             </div>
-            <span className="font-semibold text-slate-700">QuantumShield</span>
+            <span className="font-semibold text-slate-700">
+              QuantumShield
+            </span>
             <span className="text-slate-300">·</span>
-            <span className="text-slate-500 text-[11px]">Banking Security Audit & Zero-Trust Readiness</span>
+            <span className="text-slate-500 text-[11px]">
+              Banking Security Audit & Zero-Trust Readiness
+            </span>
           </div>
 
           <p className="text-slate-400 text-[11px]">
-            Methodology aligned with NIST FIPS 203/204/205 & NSA Commercial National Security Algorithm Suite 2.0 (CNSA 2.0).
+            Methodology aligned with NIST FIPS 203/204/205 & NSA Commercial
+            National Security Algorithm Suite 2.0 (CNSA 2.0).
           </p>
 
           <div className="text-[11px] text-slate-400 font-mono">

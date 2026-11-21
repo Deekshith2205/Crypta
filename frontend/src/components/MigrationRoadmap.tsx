@@ -1,6 +1,6 @@
 import React from 'react';
 import type { MigrationStep } from '../types/scan';
-import { Zap, Clock, ArrowRight, ShieldCheck, Award, Eye, EyeOff } from 'lucide-react';
+import { Zap, Eye, EyeOff } from 'lucide-react';
 
 interface MigrationRoadmapProps {
   plan: MigrationStep[];

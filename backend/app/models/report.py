@@ -53,3 +53,7 @@ class CompleteAssessmentReport(BaseModel):
     what_if_results: Optional[Dict[str, Any]] = Field(default=None, description="Alias for what_if")
     audit: AuditRecord = Field(..., description="Tamper-evident cryptographic audit hash record")
     audit_metadata: AuditRecord = Field(..., description="Alias for audit")
+    ai_advisory: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional AI advisory report narrative (informational only; excluded from deterministic audit seal)"
+    )

@@ -1,22 +1,25 @@
+
 import React, { useState, useEffect } from 'react';
-import type { BankingRiskAssessment } from '../types/scan';
-import { getBankingRiskRankings } from '../services/api';
+import type {
+  BankingRiskAssessment,
+  BankingSystemProfile,
+} from '../types/scan';
 import {
-  ShieldAlert,
+  getBankingProfiles,
+  getBankingRiskRankings,
+} from '../services/api';
+import {
   ArrowRight,
-  TrendingUp,
   AlertTriangle,
   Lock,
-  Layers,
-  Clock,
-  KeyRound,
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Loader2,
   Info,
   Sliders,
+  Sparkles,
 } from 'lucide-react';
+import { AIBankingRiskModal } from './ai/AIBankingRiskModal';
 
 interface BankingRiskOverviewProps {
   onAuditProfile: (profileId: string, suggestedDomain?: string) => void;
@@ -36,27 +39,39 @@ export const BankingRiskOverview: React.FC<BankingRiskOverviewProps> = ({
   onSimulateProfile,
 }) => {
   const [rankings, setRankings] = useState<BankingRiskAssessment[]>([]);
+  const [profiles, setProfiles] = useState<BankingSystemProfile[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>('BANK-PROF-CORE-BANKING');
+  const [selectedAiRisk, setSelectedAiRisk] = useState<BankingRiskAssessment | null>(null);
 
   useEffect(() => {
     let isMounted = true;
-    setIsLoading(true);
-    getBankingRiskRankings()
-      .then((data) => {
+
+    Promise.all([
+      getBankingRiskRankings(),
+      getBankingProfiles(),
+    ])
+      .then(([rankingsData, profilesData]) => {
         if (isMounted) {
-          setRankings(data);
+          setRankings(rankingsData);
+          setProfiles(profilesData);
           setError(null);
         }
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (isMounted) {
-          setError(err.message || 'Failed to load banking risk rankings.');
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Failed to load banking risk rankings and profiles.'
+          );
         }
       })
       .finally(() => {
-        if (isMounted) setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       });
 
     return () => {
@@ -263,6 +278,15 @@ export const BankingRiskOverview: React.FC<BankingRiskOverviewProps> = ({
                       )}
 
                       <button
+                        onClick={() => setSelectedAiRisk(item)}
+                        className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-indigo-50 border border-indigo-200 text-[#5755D9] hover:bg-indigo-100 text-xs font-semibold shadow-xs transition cursor-pointer"
+                        title="AI-powered explanation of why this system received this score and rank"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-[#5755D9]" />
+                        <span>AI Reasoning</span>
+                      </button>
+
+                      <button
                         onClick={() => setExpandedId(isExpanded ? null : item.asset_id)}
                         className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 transition cursor-pointer"
                         aria-label={isExpanded ? 'Collapse analysis' : 'Expand analysis'}
@@ -431,6 +455,20 @@ export const BankingRiskOverview: React.FC<BankingRiskOverviewProps> = ({
             );
           })}
         </div>
+      )}
+
+      {/* Task 10: AI Banking Risk Modal */}
+      {selectedAiRisk && (
+        <AIBankingRiskModal
+          isOpen={!!selectedAiRisk}
+          onClose={() => setSelectedAiRisk(null)}
+          profile={
+            profiles.find(
+              (profile) => profile.id === selectedAiRisk.asset_id
+            ) ?? null
+          }
+          risk={selectedAiRisk}
+        />
       )}
     </div>
   );

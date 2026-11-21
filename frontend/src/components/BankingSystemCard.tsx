@@ -28,7 +28,10 @@ import {
   FileJson,
   FileText,
   ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
+
+import { AIBankingRiskModal } from './ai/AIBankingRiskModal';
 
 interface BankingSystemCardProps {
   profile: BankingAsset;
@@ -60,6 +63,8 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
 
   const [reportActionError, setReportActionError] =
     useState<string | null>(null);
+
+  const [aiModalOpen, setAiModalOpen] = useState<boolean>(false);
 
   // ==========================================================================
   // BADGE HELPERS
@@ -326,6 +331,18 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
               >
                 <Sliders className="w-3.5 h-3.5" />
                 <span>What-If</span>
+              </button>
+            )}
+
+            {/* Task 10: AI Risk Reasoning */}
+            {risk && (
+              <button
+                onClick={() => setAiModalOpen(true)}
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-[#5755D9] hover:bg-indigo-100 text-xs font-semibold transition cursor-pointer shadow-2xs"
+                title="Explain deterministic risk score with AI reasoning"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-[#5755D9]" />
+                <span>AI Reasoning</span>
               </button>
             )}
 
@@ -1021,6 +1038,13 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
         </div>
       )}
 
+      {/* Task 10: AI Banking Risk Modal */}
+      <AIBankingRiskModal
+        isOpen={aiModalOpen}
+        onClose={() => setAiModalOpen(false)}
+        profile={profile}
+        risk={risk}
+      />
     </div>
   );
 };

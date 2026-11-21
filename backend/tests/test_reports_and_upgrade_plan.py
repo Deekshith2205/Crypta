@@ -56,6 +56,37 @@ def test_pdf_report_generation():
         "Generated file does not have a valid PDF magic header"
     )
 
+def test_pdf_report_escapes_untrusted_ai_advisory_markup():
+    """AI-generated text must be rendered as plain text, not ReportLab markup."""
+    report = build_complete_json_report("BANK-PROF-CORE-BANKING")
+
+    report = report.model_copy(update={
+        "ai_advisory": {
+            "executive_summary": {
+                "overall_situation": (
+                    "<b>Injected formatting</b> & "
+                    "<font color='red'>untrusted content</font>"
+                ),
+                "high_level_actions": "Action <script>alert('x')</script>",
+            },
+            "technical_summary": {
+                "algorithm_migration": "Migrate <RSA-2048> & review keys",
+            },
+            "advisory_disclaimer": (
+                "Informational only: <b>not authoritative</b> & "
+                "scanner remains authoritative."
+            ),
+        }
+    })
+
+    pdf_bytes = generate_pdf_report(
+        "BANK-PROF-CORE-BANKING",
+        report=report,
+    )
+
+    assert isinstance(pdf_bytes, bytes)
+    assert pdf_bytes.startswith(b"%PDF-")
+    assert len(pdf_bytes) > 2000
 
 def test_pdf_report_for_all_banking_profiles():
     """PDF export must succeed across all 8 synthetic banking systems."""

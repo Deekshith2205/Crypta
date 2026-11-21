@@ -6,8 +6,10 @@ interface NavbarProps {
   onOpenExportModal: () => void;
   hasScanData: boolean;
   backendOnline: boolean;
-  activeView: 'scanner' | 'catalog' | 'risk' | 'simulator';
-  onSelectView: (view: 'scanner' | 'catalog' | 'risk' | 'simulator') => void;
+  activeView: 'scanner' | 'catalog' | 'risk' | 'simulator' | 'upgrade-plan';
+  onSelectView: (
+    view: 'scanner' | 'catalog' | 'risk' | 'simulator' | 'upgrade-plan'
+  ) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
