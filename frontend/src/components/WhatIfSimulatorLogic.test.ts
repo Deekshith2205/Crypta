@@ -90,8 +90,8 @@ describe('What-If Simulator Logic - 3. Payload Validation & Building', () => {
   test('builds valid WhatIfMigrationRequest payload', () => {
     const payload = buildWhatIfPayload('BANK-PROF-1', [initialChange]);
     assert.strictEqual(payload.asset_id, 'BANK-PROF-1');
-    assert.strictEqual(payload.simulated_changes.length, 1);
-    assert.strictEqual(payload.simulated_changes[0].component, 'KEY_WRAPPING');
-    assert.strictEqual(payload.simulated_changes[0].target_algorithm, 'ML-KEM-768');
+    assert.strictEqual(payload.changes.length, 1);
+    assert.strictEqual(payload.changes[0].component, 'KEY_WRAPPING');
+    assert.strictEqual(payload.changes[0].target_algorithm, 'ML-KEM-768');
   });
 });

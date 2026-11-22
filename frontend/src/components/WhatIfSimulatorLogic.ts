@@ -252,7 +252,7 @@ export function buildWhatIfPayload(
 ): WhatIfMigrationRequest {
   return {
     asset_id: assetId.trim(),
-    simulated_changes: changes.map((c) => ({
+    changes: changes.map((c) => ({
       component: c.component,
       target_algorithm: c.target_algorithm,
       description: c.description || '',
