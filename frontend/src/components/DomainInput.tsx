@@ -40,13 +40,15 @@ export const DomainInput: React.FC<DomainInputProps> = ({
           value={domain}
           onChange={(e) => setDomain(e.target.value)}
           placeholder="Enter a domain to scan (e.g., example.com)"
+          aria-label="Domain name to scan"
           className="flex-1 bg-transparent px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none"
         />
 
         <button
           type="submit"
           disabled={isLoading}
-          className="inline-flex items-center space-x-2 px-6 py-2.5 rounded-xl bg-[#18181B] hover:bg-black text-white text-sm font-semibold transition cursor-pointer disabled:opacity-50"
+          aria-label="Start domain cryptographic scan"
+          className="inline-flex items-center space-x-2 px-6 py-2.5 rounded-xl bg-[#18181B] hover:bg-black text-white text-sm font-semibold transition cursor-pointer disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-[#5755D9] focus-visible:outline-none"
         >
           {isLoading ? (
             <>
@@ -62,7 +64,11 @@ export const DomainInput: React.FC<DomainInputProps> = ({
         </button>
       </div>
 
-      {error && <p className="text-xs text-rose-600 pl-4">{error}</p>}
+      {error && (
+        <p role="alert" aria-live="polite" className="text-xs text-rose-600 pl-4">
+          {error}
+        </p>
+      )}
     </form>
   );
 };

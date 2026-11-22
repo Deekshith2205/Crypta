@@ -11,6 +11,17 @@ interface JsonExportModalProps {
 export const JsonExportModal: React.FC<JsonExportModalProps> = ({ isOpen, onClose, data }) => {
   const [copied, setCopied] = useState(false);
 
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen || !data) return null;
 
   const jsonString = JSON.stringify(data, null, 2);
@@ -35,16 +46,25 @@ export const JsonExportModal: React.FC<JsonExportModalProps> = ({ isOpen, onClos
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="relative w-full max-w-4xl rounded-2xl bg-white border border-slate-200 shadow-2xl p-6 sm:p-8 max-h-[90vh] flex flex-col space-y-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="json-export-title"
+        className="relative w-full max-w-4xl rounded-2xl bg-white border border-slate-200 shadow-2xl p-6 sm:p-8 max-h-[90vh] flex flex-col space-y-4"
+      >
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900 font-mono">Structured Assessment JSON Report</h2>
+            <h2 id="json-export-title" className="text-lg font-semibold text-slate-900 font-mono">
+              Structured Assessment JSON Report
+            </h2>
             <p className="text-xs text-slate-500">Target: {data.target.domain}</p>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+            aria-label="Close JSON report dialog"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer focus-visible:ring-2 focus-visible:ring-[#5755D9]"
           >
             <X className="w-5 h-5" />
           </button>

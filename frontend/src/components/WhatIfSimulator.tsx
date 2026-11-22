@@ -24,84 +24,18 @@ import {
   FileCheck2,
 } from 'lucide-react';
 import { AIMigrationAdvisorModal } from './ai/AIMigrationAdvisorModal';
+import {
+  SUPPORTED_TARGETS,
+  addSimulationChange,
+  removeSimulationChange,
+  updateSimulationChange,
+  getSimulationPreset,
+  buildWhatIfPayload,
+} from './WhatIfSimulatorLogic.ts';
 
 interface WhatIfSimulatorProps {
   initialAssetId?: string;
 }
-
-const SUPPORTED_TARGETS: Record<
-  MigrationComponent,
-  { value: string; label: string; desc: string }[]
-> = {
-  KEY_WRAPPING: [
-    {
-      value: 'ML-KEM-768',
-      label: 'ML-KEM-768 (FIPS 203)',
-      desc: 'NIST Standardized Category 3 Lattice KEM (Primary)',
-    },
-    {
-      value: 'ML-KEM-1024',
-      label: 'ML-KEM-1024 (FIPS 203)',
-      desc: 'NIST Category 5 Maximum Security Lattice KEM',
-    },
-    {
-      value: 'X25519MLKEM768',
-      label: 'X25519MLKEM768 Hybrid',
-      desc: 'IETF RFC 9870 Hybrid Classical + PQC KEM',
-    },
-    {
-      value: 'AES-256-KW',
-      label: 'AES-256 Key Wrap (NIST SP 800-38F)',
-      desc: 'Symmetric Key Wrap (Grover Resilient)',
-    },
-  ],
-  AUTHENTICATION: [
-    {
-      value: 'ML-DSA-65',
-      label: 'ML-DSA-65 (FIPS 204)',
-      desc: 'NIST Standardized Lattice Signature (Primary)',
-    },
-    {
-      value: 'ML-DSA-87',
-      label: 'ML-DSA-87 (FIPS 204)',
-      desc: 'NIST Category 5 High Security Lattice Signature',
-    },
-    {
-      value: 'SLH-DSA-128s',
-      label: 'SLH-DSA-128s (FIPS 205)',
-      desc: 'Stateless Hash-Based Digital Signature Standard',
-    },
-    {
-      value: 'SLH-DSA-128f',
-      label: 'SLH-DSA-128f (FIPS 205)',
-      desc: 'Fast Hash-Based Digital Signature',
-    },
-  ],
-  TLS_PROTOCOL: [
-    {
-      value: 'TLSv1.3',
-      label: 'TLS 1.3 (RFC 8446)',
-      desc: 'Modern Transport Protocol removing obsolete ciphers',
-    },
-  ],
-  TLS_KEY_EXCHANGE: [
-    {
-      value: 'X25519MLKEM768',
-      label: 'X25519MLKEM768 Hybrid (0x11ec)',
-      desc: 'IETF Draft Hybrid Key Agreement for TLS 1.3',
-    },
-    {
-      value: 'SecP256r1MLKEM768',
-      label: 'SecP256r1MLKEM768 Hybrid (0x11ed)',
-      desc: 'NIST P-256 + ML-KEM-768 Hybrid Key Agreement',
-    },
-    {
-      value: 'X448MLKEM1024',
-      label: 'X448MLKEM1024 Hybrid (0x11ee)',
-      desc: 'X448 + ML-KEM-1024 High Security Hybrid Group',
-    },
-  ],
-};
 
 export const WhatIfSimulator: React.FC<WhatIfSimulatorProps> = ({
   initialAssetId = 'BANK-PROF-CORE-BANKING',
@@ -178,108 +112,34 @@ export const WhatIfSimulator: React.FC<WhatIfSimulatorProps> = ({
   );
 
   const handleAddChange = () => {
-    if (changes.length >= 5) return;
-
-    setChanges([
-      ...changes,
-      {
-        component: 'AUTHENTICATION',
-        target_algorithm: 'ML-DSA-65',
-        description: 'Upgrade root authentication signatures to FIPS 204 ML-DSA',
-      },
-    ]);
+    setChanges((prev) => addSimulationChange(prev));
   };
 
   const handleRemoveChange = (index: number) => {
-    if (changes.length <= 1) return;
-
-    setChanges(changes.filter((_, currentIndex) => currentIndex !== index));
+    setChanges((prev) => removeSimulationChange(prev, index));
   };
 
   const handleUpdateChange = (
     index: number,
     updated: Partial<MigrationAction>
   ) => {
-    const next = [...changes];
-    const current = next[index];
-
-    const newComponent = updated.component || current.component;
-    let newTarget = updated.target_algorithm || current.target_algorithm;
-
-    const allowed = SUPPORTED_TARGETS[newComponent];
-
-    if (!allowed.some((option) => option.value === newTarget)) {
-      newTarget = allowed[0].value;
-    }
-
-    next[index] = {
-      ...current,
-      ...updated,
-      component: newComponent,
-      target_algorithm: newTarget,
-    };
-
-    setChanges(next);
+    setChanges((prev) => updateSimulationChange(prev, index, updated));
   };
 
   const applyPreset = (
     presetType: 'wrapping' | 'auth' | 'full' | 'transport'
   ) => {
-    if (presetType === 'wrapping') {
-      setChanges([
-        {
-          component: 'KEY_WRAPPING',
-          target_algorithm: 'ML-KEM-768',
-          description: 'Migrate asymmetric key wrapping to NIST FIPS 203 ML-KEM-768',
-        },
-      ]);
-    } else if (presetType === 'auth') {
-      setChanges([
-        {
-          component: 'AUTHENTICATION',
-          target_algorithm: 'ML-DSA-65',
-          description: 'Transition digital signatures to NIST FIPS 204 ML-DSA-65',
-        },
-      ]);
-    } else if (presetType === 'full') {
-      setChanges([
-        {
-          component: 'KEY_WRAPPING',
-          target_algorithm: 'ML-KEM-768',
-          description: 'Migrate asymmetric key wrapping to NIST FIPS 203 ML-KEM-768',
-        },
-        {
-          component: 'AUTHENTICATION',
-          target_algorithm: 'ML-DSA-65',
-          description: 'Transition digital signatures to NIST FIPS 204 ML-DSA-65',
-        },
-      ]);
-    } else if (presetType === 'transport') {
-      setChanges([
-        {
-          component: 'TLS_PROTOCOL',
-          target_algorithm: 'TLSv1.3',
-          description: 'Enforce modern TLS 1.3 protocol',
-        },
-        {
-          component: 'TLS_KEY_EXCHANGE',
-          target_algorithm: 'X25519MLKEM768',
-          description: 'Deploy hybrid post-quantum key agreement group',
-        },
-      ]);
-    }
+    setChanges(getSimulationPreset(presetType));
   };
 
   const handleRunSimulation = async () => {
+    if (!selectedAssetId) return;
     setIsSimulating(true);
     setError(null);
 
     try {
-      const simulationResult = await simulateMigration({
-        asset_id: selectedAssetId,
-        changes,
-      });
-
+      const payload = buildWhatIfPayload(selectedAssetId, changes);
+      const simulationResult = await simulateMigration(payload);
       setResult(simulationResult);
     } catch (err: unknown) {
       setError(

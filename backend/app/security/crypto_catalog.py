@@ -3,6 +3,7 @@ Defines risk classifications, quantum threat vectors (Shor vs Grover),
 and NIST Post-Quantum Cryptography (PQC) standards mappings.
 """
 
+import re
 from typing import Dict, Any, Optional
 from enum import Enum
 
@@ -106,6 +107,58 @@ ALGORITHM_CATALOG: Dict[str, Dict[str, Any]] = {
         "vulnerability_explanation": (
             "Classical Diffie-Hellman (DHE/DH) key establishment is broken by Shor's algorithm. "
             "Under 'Store Now, Decrypt Later' (SNDL), recorded ciphertexts can be decrypted retroactively."
+        ),
+        "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
+    },
+    "DH-1024": {
+        "family": "Diffie-Hellman",
+        "category": "key_exchange",
+        "key_size": 1024,
+        "threat_vector": QuantumThreatVector.CLASSICAL_BROKEN.value,
+        "shor_vulnerable": True,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "1024-bit Diffie-Hellman is classically broken (vulnerable to Logjam attacks and precomputation) "
+            "and disallowed by NIST SP 800-131A Rev 2. It is also completely broken by Shor's algorithm on a CRQC."
+        ),
+        "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
+    },
+    "DH-2048": {
+        "family": "Diffie-Hellman",
+        "category": "key_exchange",
+        "key_size": 2048,
+        "threat_vector": QuantumThreatVector.SNDL.value,
+        "shor_vulnerable": True,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "2048-bit Diffie-Hellman provides ~112 bits of classical security, but is vulnerable to Shor's algorithm "
+            "and 'Store Now, Decrypt Later' (SNDL) attacks by quantum adversaries."
+        ),
+        "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
+    },
+    "diffie-hellman-group1-sha1": {
+        "family": "Diffie-Hellman",
+        "category": "key_exchange",
+        "key_size": 1024,
+        "threat_vector": QuantumThreatVector.CLASSICAL_BROKEN.value,
+        "shor_vulnerable": True,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "diffie-hellman-group1-sha1 uses a 1024-bit MODP group (Oakley Group 2) and deprecated SHA-1, "
+            "rendering it vulnerable to Logjam precomputations, hash collisions, and Shor's algorithm."
+        ),
+        "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
+    },
+    "diffie-hellman-group14-sha256": {
+        "family": "Diffie-Hellman",
+        "category": "key_exchange",
+        "key_size": 2048,
+        "threat_vector": QuantumThreatVector.SNDL.value,
+        "shor_vulnerable": True,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "diffie-hellman-group14-sha256 uses 2048-bit MODP group with SHA-256. Classically acceptable, "
+            "but vulnerable to quantum SNDL attacks."
         ),
         "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
     },
@@ -222,5 +275,388 @@ ALGORITHM_CATALOG: Dict[str, Dict[str, Any]] = {
         ),
         "target_standard": PQC_STANDARDS["SHA_384"]["standard"],
     },
+    "3DES": {
+        "family": "3DES",
+        "category": "symmetric_cipher",
+        "threat_vector": QuantumThreatVector.CLASSICAL_BROKEN.value,
+        "shor_vulnerable": False,
+        "grover_vulnerable": True,
+        "vulnerability_explanation": (
+            "Triple-DES (3DES) is deprecated by NIST (SP 800-131A Rev 2) and disallowed after 2023 "
+            "due to Sweet32 64-bit block collision attacks and inadequate key strength."
+        ),
+        "target_standard": PQC_STANDARDS["AES_256"]["standard"],
+    },
+    "DES": {
+        "family": "DES",
+        "category": "symmetric_cipher",
+        "threat_vector": QuantumThreatVector.CLASSICAL_BROKEN.value,
+        "shor_vulnerable": False,
+        "grover_vulnerable": True,
+        "vulnerability_explanation": (
+            "Single DES uses a 56-bit key trivially breakable by classical exhaustive search."
+        ),
+        "target_standard": PQC_STANDARDS["AES_256"]["standard"],
+    },
+    "RC4": {
+        "family": "RC4",
+        "category": "symmetric_cipher",
+        "threat_vector": QuantumThreatVector.CLASSICAL_BROKEN.value,
+        "shor_vulnerable": False,
+        "grover_vulnerable": True,
+        "vulnerability_explanation": (
+            "RC4 stream cipher suffers from severe statistical biases (RFC 7465 prohibits its use in TLS)."
+        ),
+        "target_standard": PQC_STANDARDS["AES_256"]["standard"],
+    },
+    "ML-KEM": {
+        "family": "ML-KEM",
+        "category": "key_exchange",
+        "threat_vector": QuantumThreatVector.POST_QUANTUM.value,
+        "shor_vulnerable": False,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "NIST FIPS 203 standardized post-quantum module-lattice key encapsulation mechanism."
+        ),
+        "target_standard": PQC_STANDARDS["ML_KEM"]["standard"],
+    },
+    "ML-DSA": {
+        "family": "ML-DSA",
+        "category": "public_key",
+        "threat_vector": QuantumThreatVector.POST_QUANTUM.value,
+        "shor_vulnerable": False,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "NIST FIPS 204 standardized post-quantum module-lattice digital signature standard."
+        ),
+        "target_standard": PQC_STANDARDS["ML_DSA"]["standard"],
+    },
+    "SLH-DSA": {
+        "family": "SLH-DSA",
+        "category": "public_key",
+        "threat_vector": QuantumThreatVector.POST_QUANTUM.value,
+        "shor_vulnerable": False,
+        "grover_vulnerable": False,
+        "vulnerability_explanation": (
+            "NIST FIPS 205 standardized stateless hash-based digital signature standard."
+        ),
+        "target_standard": PQC_STANDARDS["SLH_DSA"]["standard"],
+    },
 }
+
+
+def parse_dh_parameter(val_or_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Identifies and parses Diffie-Hellman parameters, groups, and key exchange algorithms.
+    Accurately extracts canonical family ('Diffie-Hellman'), key size, role ('Key Establishment'),
+    weakness classification, severity (CRITICAL vs HIGH), and NIST ML-KEM migration recommendations.
+    """
+    if not val_or_name or not isinstance(val_or_name, str):
+        return None
+    clean = val_or_name.strip()
+    clean_u = clean.upper()
+
+    # Fast validation: is this a Diffie-Hellman indicator?
+    is_dh = False
+    if any(k in clean_u for k in ("DIFFIE", "DHE", "FFDHE", "DHPARAM", "DH_PARAM", "SSL_DHPARAM")):
+        is_dh = True
+    elif "DH" in clean_u and not any(k in clean_u for k in ("ECDH", "CHACHA")):
+        # Look for DH followed or preceded by numbers, or word boundary / file extension
+        if re.search(r"(?i)(?:\b|_|-|/)dh(?:\b|_|-|\d|\.pem)", clean):
+            is_dh = True
+
+    if not is_dh:
+        return None
+
+    # Key size extraction
+    key_size = None
+    if "GROUP14" in clean_u:
+        key_size = 2048
+    elif "GROUP15" in clean_u:
+        key_size = 3072
+    elif "GROUP16" in clean_u:
+        key_size = 4096
+    elif "GROUP1" in clean_u or "GROUP2" in clean_u:
+        key_size = 1024
+    elif "1024" in clean_u:
+        key_size = 1024
+    elif "2048" in clean_u:
+        key_size = 2048
+    elif "3072" in clean_u:
+        key_size = 3072
+    elif "4096" in clean_u:
+        key_size = 4096
+    elif "768" in clean_u:
+        key_size = 768
+    else:
+        m = re.search(r"(?i)(?:dh|ffdhe)?[-_]?(\d{3,4})", clean)
+        if m:
+            try:
+                key_size = int(m.group(1))
+            except ValueError:
+                key_size = None
+
+    # Weakness determination: key_size < 2048 or SHA-1 usage
+    is_weak = False
+    if key_size is not None and key_size < 2048:
+        is_weak = True
+    if "SHA1" in clean_u or "SHA-1" in clean_u:
+        is_weak = True
+
+    # Canonical name
+    if "GROUP1-SHA1" in clean_u or "GROUP1_SHA1" in clean_u:
+        canonical_name = "diffie-hellman-group1-sha1"
+    elif "GROUP14-SHA256" in clean_u or "GROUP14_SHA256" in clean_u:
+        canonical_name = "diffie-hellman-group14-sha256"
+    elif "FFDHE" in clean_u and key_size:
+        canonical_name = f"FFDHE-{key_size}"
+    elif key_size:
+        canonical_name = f"DH-{key_size}"
+    else:
+        canonical_name = "Diffie-Hellman"
+
+    severity = "CRITICAL" if is_weak else "HIGH"
+    threat_vector = (
+        QuantumThreatVector.CLASSICAL_BROKEN.value
+        if is_weak
+        else QuantumThreatVector.SNDL.value
+    )
+
+    rec = "Upgrade to X25519 + ML-KEM-768 hybrid key exchange (NIST FIPS 203) and decommission finite-field Diffie-Hellman."
+
+    return {
+        "family": "Diffie-Hellman",
+        "role": "Key Establishment",
+        "canonical_name": canonical_name,
+        "key_size": key_size,
+        "is_weak": is_weak,
+        "severity": severity,
+        "threat_vector": threat_vector,
+        "recommendation": rec,
+        "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
+    }
+
+
+def get_algorithm_profile(algo_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Retrieves the cryptographic profile and quantum threat assessment for a primitive.
+    Matches exact catalog keys or canonical algorithm identifiers.
+    """
+    if not algo_name or not isinstance(algo_name, str):
+        return None
+    clean = algo_name.strip().upper()
+    if not clean:
+        return None
+
+    # 1. Exact catalog key match (case-insensitive)
+    for key, profile in ALGORITHM_CATALOG.items():
+        if clean == key.upper():
+            return profile
+
+    # 2. Canonical substring pattern matches
+    # Diffie-Hellman variants and parameters
+    dh_info = parse_dh_parameter(clean)
+    if dh_info:
+        canon = dh_info["canonical_name"]
+        if canon in ALGORITHM_CATALOG:
+            return ALGORITHM_CATALOG[canon]
+        return {
+            "family": dh_info["family"],
+            "category": "key_exchange",
+            "key_size": dh_info["key_size"],
+            "threat_vector": dh_info["threat_vector"],
+            "shor_vulnerable": True,
+            "grover_vulnerable": False,
+            "vulnerability_explanation": (
+                f"{dh_info['canonical_name']} key establishment is vulnerable to Shor's algorithm and SNDL."
+                if not dh_info["is_weak"]
+                else f"{dh_info['canonical_name']} is classically broken (inadequate key size / Logjam) and vulnerable to Shor's algorithm."
+            ),
+            "target_standard": PQC_STANDARDS["ML_KEM"]["hybrid_target"],
+        }
+
+    # Classically broken primitives
+    if any(k in clean for k in ["3DES", "TRIPLE-DES", "DES-EDE"]):
+        return ALGORITHM_CATALOG.get("3DES")
+    if "RC4" in clean:
+        return ALGORITHM_CATALOG.get("RC4")
+    if "MD5" in clean:
+        return ALGORITHM_CATALOG.get("MD5")
+    if "SHA-1" in clean or "SHA1" in clean:
+        return ALGORITHM_CATALOG.get("SHA-1")
+    if "DES" in clean and not any(k in clean for k in ["ED25519", "ED448", "EDDSA", "ECDSA", "ML-DSA", "SLH-DSA"]):
+        return ALGORITHM_CATALOG.get("DES")
+
+    # Post-quantum primitives
+    if any(k in clean for k in ["ML-KEM", "KYBER"]):
+        return ALGORITHM_CATALOG.get("ML-KEM")
+    if any(k in clean for k in ["ML-DSA", "DILITHIUM"]):
+        return ALGORITHM_CATALOG.get("ML-DSA")
+    if any(k in clean for k in ["SLH-DSA", "SPHINCS"]):
+        return ALGORITHM_CATALOG.get("SLH-DSA")
+
+    # Quantum-resistant symmetric ciphers & hashes
+    if any(k in clean for k in ["AES-256", "AES256"]):
+        return ALGORITHM_CATALOG.get("AES-256")
+    if any(k in clean for k in ["CHACHA20", "CHACHA"]):
+        return ALGORITHM_CATALOG.get("ChaCha20")
+    if any(k in clean for k in ["SHA-512", "SHA512"]):
+        return ALGORITHM_CATALOG.get("SHA-512")
+    if any(k in clean for k in ["SHA-384", "SHA384"]):
+        return ALGORITHM_CATALOG.get("SHA-384")
+    if any(k in clean for k in ["SHA-256", "SHA256"]):
+        return ALGORITHM_CATALOG.get("SHA-256")
+
+    # Grover-vulnerable symmetric ciphers
+    if any(k in clean for k in ["AES-128", "AES128", "AES-192", "AES192"]):
+        return ALGORITHM_CATALOG.get("AES-128")
+
+    # Shor-vulnerable asymmetric public-key and key-exchange algorithms
+    if any(k in clean for k in ["RSA", "OAEP", "PKCS1", "PKCS#1", "PSS"]):
+        return ALGORITHM_CATALOG.get("RSA")
+    if "ECDHE" in clean or "X25519" in clean:
+        return ALGORITHM_CATALOG.get("ECDHE")
+    if any(k in clean for k in ["ECDSA", "ECC", "SECP", "PRIME256"]):
+        return ALGORITHM_CATALOG.get("ECC")
+    if any(k in clean for k in ["ED25519", "ED448", "EDDSA"]):
+        return ALGORITHM_CATALOG.get("EdDSA")
+    if any(k in clean for k in ["DIFFIE", "DHE"]) or ("DH" in clean and "ECDH" not in clean):
+        return ALGORITHM_CATALOG.get("Diffie-Hellman")
+
+    return None
+
+
+def is_known_algorithm(val_or_name: Optional[str]) -> bool:
+    """Returns True if val_or_name represents a recognized, established cryptographic algorithm or protocol."""
+    if not val_or_name:
+        return False
+    clean = str(val_or_name).strip()
+    if clean.upper() in ("", "NONE", "N/A", "UNKNOWN", "NOT OBSERVABLE", "NOT_OBSERVABLE", "UNSPECIFIED", "NULL"):
+        return False
+    if clean.upper() in ALGORITHM_CATALOG or clean in ALGORITHM_CATALOG:
+        return True
+    if parse_dh_parameter(clean) is not None:
+        return True
+    if get_algorithm_profile(clean) is not None:
+        return True
+    if re.match(r'^(?:TLS|SSL)[\s_v]*(?:1\.[0-3]|2\.0|3\.0)$', clean, re.I):
+        return True
+    return False
+
+
+def resolve_quantum_migration_recommendation(
+    role: Optional[str] = None,
+    control: Optional[str] = None,
+    algorithm: Optional[str] = None,
+    current_recommendation: Optional[str] = None,
+) -> str:
+    """Returns a strictly role-aware post-quantum migration recommendation.
+
+    Key Establishment / Key Exchange -> NIST FIPS 203 (ML-KEM / Kyber) or Hybrid
+    Digital Signature / Certificate Authentication -> NIST FIPS 204 (ML-DSA) or FIPS 205 (SLH-DSA)
+    Symmetric Ciphers -> AES-256-GCM (Grover quadratic resistance)
+    Hashes / Integrity -> SHA-256 / SHA-384
+    """
+    ctx = f"{role or ''} {control or ''} {algorithm or ''}".upper()
+
+    # 1. Digital Signatures / Certificates / Identity Authentication
+    if any(k in ctx for k in ["SIGNATURE", "CERTIFICATE", "LEAF CERT", "AUTH", "DIGITAL_SIGNATURE", "CERTIFICATE_AUTHENTICATION"]):
+        return "Transition to NIST FIPS 204 (ML-DSA / Dilithium) or NIST FIPS 205 (SLH-DSA) post-quantum digital signatures."
+
+    # 2. Key Establishment / Key Exchange / Key Encapsulation / Key Wrapping
+    if any(k in ctx for k in ["EXCHANGE", "KEX", "SESSION KEY", "WRAPPING", "ESTABLISHMENT", "KEY_EXCHANGE", "KEY_WRAPPING", "DIFFIE", "DH"]):
+        return "Transition to NIST FIPS 203 (ML-KEM / Kyber) or hybrid post-quantum key exchange (X25519 + ML-KEM-768)."
+
+    # 3. Symmetric Ciphers / Bulk Data Encryption
+    if any(k in ctx for k in ["AES-128", "AES128", "SYMMETRIC", "BULK_ENCRYPTION", "DATA_ENCRYPTION"]):
+        return "Upgrade symmetric encryption keys to AES-256-GCM to achieve ~128-bit quantum security margin under Grover's algorithm."
+
+    # 4. Hash Functions / Message Digests
+    if any(k in ctx for k in ["HASH", "MD5", "SHA-1", "SHA1", "DIGEST", "HASH_FUNCTION"]):
+        return "Replace legacy hash function with SHA-256 or SHA-384 for quantum collision resistance."
+
+    if current_recommendation and "ML-KEM / ML-DSA" not in current_recommendation:
+        return current_recommendation
+
+    return "Transition to approved NIST Post-Quantum Cryptographic Standards."
+
+
+def classify_risk_domain(
+    algorithm: Optional[str] = None,
+    threat_vector: Optional[str] = None,
+    title: Optional[str] = None,
+    category: Optional[str] = None,
+    default: str = "UNKNOWN",
+) -> str:
+    """Deterministically classifies finding risk domain into 'QUANTUM', 'CLASSICAL', or 'UNKNOWN'.
+
+    Evaluation order:
+    1. Explicit threat vector mapping (e.g. SHOR, GROVER, SNDL, RESISTANT, POST_QUANTUM -> QUANTUM;
+       CLASSICAL_BROKEN -> CLASSICAL).
+    2. Central knowledge base lookup via get_algorithm_profile(algorithm).
+    3. Structural text pattern matching across title, category, and algorithm.
+    4. Safe fallback to default ("UNKNOWN").
+    """
+    # 1. Threat vector mapping
+    if threat_vector:
+        tv = str(threat_vector).upper()
+        # Must check CLASSICAL_BROKEN before checking for "QUANTUM" because
+        # CLASSICAL_BROKEN's description is "Classically Broken & Quantum Insecure".
+        if (
+            "CLASSICAL_BROKEN" in tv
+            or "CLASSICALLY BROKEN" in tv
+            or tv == QuantumThreatVector.CLASSICAL_BROKEN.value.upper()
+        ):
+            return "CLASSICAL"
+        if any(
+            q in tv
+            for q in [
+                "SHOR",
+                "GROVER",
+                "SNDL",
+                "RESISTANT",
+                "POST_QUANTUM",
+                "POST-QUANTUM",
+                "QUANTUM",
+            ]
+        ):
+            return "QUANTUM"
+
+    # 2. Central knowledge base lookup
+    if algorithm:
+        profile = get_algorithm_profile(algorithm)
+        if profile and "threat_vector" in profile:
+            vec = profile["threat_vector"]
+            if vec == QuantumThreatVector.CLASSICAL_BROKEN.value:
+                return "CLASSICAL"
+            if vec in (
+                QuantumThreatVector.SHOR.value,
+                QuantumThreatVector.GROVER.value,
+                QuantumThreatVector.SNDL.value,
+                QuantumThreatVector.RESISTANT.value,
+                QuantumThreatVector.POST_QUANTUM.value,
+            ):
+                return "QUANTUM"
+
+    # 3. Contextual text pattern matching
+    combined = f"{algorithm or ''} {title or ''} {category or ''}".upper()
+
+    # Broken classical cryptography / implementation flaws
+    if re.search(
+        r'\b(?:3DES|DES|MD5|SHA-?1|RC4|RC2|BLOWFISH|ECB|NO_SALT|STATIC_IV|WEAK_RANDOM|TLS\s*1\.[01]|TLS1\.[01]|EXPIRED|CLASSICAL_BROKEN|CLASSICAL_SECURITY)\b',
+        combined,
+    ):
+        return "CLASSICAL"
+
+    # Quantum threat / PQC indicators
+    if re.search(
+        r'\b(?:SHOR|GROVER|SNDL|PQC|QUANTUM|ML-KEM|ML-DSA|SLH-DSA|KYBER|DILITHIUM|SPHINCS|RSA|ECDH|ECDSA|DIFFIE|X25519|AES-?128|AES-?256|CHACHA20?)\b',
+        combined,
+    ):
+        return "QUANTUM"
+
+    # Standard classical transport / network protocols
+    if re.search(r'\b(?:TLS|SSL|HTTPS|SSH|KERBEROS|MTLS|IPSEC|VPN)\b', combined):
+        return "CLASSICAL"
+
+    return default
+
 

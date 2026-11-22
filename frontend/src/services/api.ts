@@ -1,6 +1,5 @@
 import type {
   ScanResponse,
-  ApiError,
   BankingSystemProfile,
   BankingRiskAssessment,
   RankedUpgradePlan,
@@ -8,6 +7,8 @@ import type {
   WhatIfMigrationResult,
   AuditRecord,
   AuditVerificationResult,
+  AuditLedgerResponse,
+  AuditHeadResponse,
   CompleteAssessmentReport,
   ArtifactFindingsResponse,
   UploadedCertificateResponse,
@@ -21,9 +22,183 @@ import type {
   MigrationAdvisoryResponse,
   ReportExplanationRequest,
   ReportExplanationResponse,
-} from '../types/scan';
+  AIBudgetTelemetry,
+  CBOMDocument,
+} from '../types/scan.ts';
+import { validateUploadFiles } from './domainValidation.ts';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = (
+  typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL
+    ? import.meta.env.VITE_API_URL
+    : ''
+).replace(/\/+$/, '');
+
+export const DEFAULT_TIMEOUT_MS = 15000;
+export const DIRECT_BACKEND_ORIGIN = 'http://127.0.0.1:8000';
+
+/**
+ * Builds a resolved URL given a path and optional base.
+ */
+export function buildResolvedUrl(path: string, base: string = API_BASE): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  if (!base) return normalizedPath;
+  return `${base.replace(/\/+$/, '')}${normalizedPath}`;
+}
+
+/**
+ * Extracts a human-readable error message from an error response or payload.
+ */
+export function extractApiErrorMessage(errorData: unknown, httpStatus?: number): string {
+  if (errorData && typeof errorData === 'object') {
+    const err = errorData as Record<string, unknown>;
+    if (typeof err.detail === 'string' && err.detail.trim()) {
+      return err.detail.trim();
+    }
+    if (typeof err.error === 'string' && err.error.trim()) {
+      return err.error.trim();
+    }
+    if (typeof err.message === 'string' && err.message.trim()) {
+      return err.message.trim();
+    }
+  }
+  return httpStatus ? `Request failed with HTTP ${httpStatus}` : 'An unexpected error occurred.';
+}
+
+/**
+ * Executes a network fetch with configurable timeout (15s default) and automatic
+ * dual-try fallback to direct backend origin (http://127.0.0.1:8000).
+ */
+export async function fetchWithFallback<T>(
+  path: string,
+  options: RequestInit = {},
+  fallbackMessage?: string
+): Promise<T> {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const primaryUrl = buildResolvedUrl(normalizedPath, API_BASE);
+  const secondaryUrl = `${DIRECT_BACKEND_ORIGIN}${normalizedPath}`;
+
+  const executeFetch = async (targetUrl: string): Promise<Response> => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let signal = options.signal;
+
+    if (!signal) {
+      if (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) {
+        signal = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
+      } else if (typeof AbortController !== 'undefined') {
+        const controller = new AbortController();
+        timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+        signal = controller.signal;
+      }
+    }
+
+    try {
+      return await fetch(targetUrl, { ...options, signal });
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
+
+  let response: Response;
+  try {
+    response = await executeFetch(primaryUrl);
+  } catch {
+    // If primary failed and is distinct from secondary, attempt fallback
+    if (primaryUrl !== secondaryUrl) {
+      try {
+        response = await executeFetch(secondaryUrl);
+      } catch {
+        throw new Error(
+          fallbackMessage ||
+            `Unable to connect to QuantumShield backend at ${secondaryUrl}. Please verify backend service is running.`
+        );
+      }
+    } else {
+      throw new Error(
+        fallbackMessage ||
+          'Unable to connect to QuantumShield backend. Please verify backend service is running.'
+      );
+    }
+  }
+
+  if (!response.ok) {
+    let errorData: unknown;
+    try {
+      errorData = await response.json();
+    } catch {
+      // Non-JSON response body
+    }
+    const message = extractApiErrorMessage(errorData, response.status);
+    throw new Error(message);
+  }
+
+  return response.json();
+}
+
+/**
+ * Specialized fetch for binary downloads (PDF reports) with fallback and timeout.
+ */
+export async function fetchBlobWithFallback(
+  path: string,
+  options: RequestInit = {},
+  fallbackMessage?: string
+): Promise<Blob> {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const primaryUrl = buildResolvedUrl(normalizedPath, API_BASE);
+  const secondaryUrl = `${DIRECT_BACKEND_ORIGIN}${normalizedPath}`;
+
+  const executeFetch = async (targetUrl: string): Promise<Response> => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let signal = options.signal;
+
+    if (!signal) {
+      if (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) {
+        signal = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
+      } else if (typeof AbortController !== 'undefined') {
+        const controller = new AbortController();
+        timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+        signal = controller.signal;
+      }
+    }
+
+    try {
+      return await fetch(targetUrl, { ...options, signal });
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
+
+  let response: Response;
+  try {
+    response = await executeFetch(primaryUrl);
+  } catch {
+    if (primaryUrl !== secondaryUrl) {
+      try {
+        response = await executeFetch(secondaryUrl);
+      } catch {
+        throw new Error(fallbackMessage || 'Unable to connect to report download service.');
+      }
+    } else {
+      throw new Error(fallbackMessage || 'Unable to connect to report download service.');
+    }
+  }
+
+  if (!response.ok) {
+    let errorData: unknown;
+    try {
+      errorData = await response.json();
+    } catch {
+      // Non-JSON response body
+    }
+    const message = extractApiErrorMessage(errorData, response.status);
+    throw new Error(message);
+  }
+
+  return response.blob();
+}
+
+// ==============================================================================
+// SCAN & ASSESSMENT ENDPOINTS
+// ==============================================================================
 
 export async function scanDomain(
   domain: string,
@@ -31,200 +206,83 @@ export async function scanDomain(
   probe_pqc: boolean = false,
   asset_id?: string
 ): Promise<ScanResponse> {
-  const url = `${API_BASE}/api/scan`;
   const payload = { domain, port, probe_pqc, ...(asset_id ? { asset_id } : {}) };
-
-  let response: Response;
-  try {
-    response = await fetch(url, {
+  return fetchWithFallback<ScanResponse>(
+    '/api/scan',
+    {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    });
-  } catch {
-    // If proxied fetch failed (e.g. backend running on :8000 directly), retry direct URL
-    try {
-      response = await fetch('http://127.0.0.1:8000/api/scan', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-    } catch {
-      throw new Error(`Unable to connect to QuantumShield assessment backend. Please verify backend is running on http://127.0.0.1:8000.`);
-    }
-  }
-
-  if (!response.ok) {
-    let errorData: ApiError;
-    try {
-      errorData = await response.json();
-    } catch {
-      throw new Error(`Server returned error HTTP ${response.status}: ${response.statusText}`);
-    }
-    const message = errorData.detail || errorData.error || `Scan failed with HTTP ${response.status}`;
-    throw new Error(message);
-  }
-
-  return response.json();
+    },
+    'Unable to connect to QuantumShield assessment backend. Please verify backend is running.'
+  );
 }
 
+// ==============================================================================
+// BANKING PROFILE & RISK ENDPOINTS
+// ==============================================================================
+
 export async function getBankingProfiles(): Promise<BankingSystemProfile[]> {
-  const url = `${API_BASE}/api/banking/profiles`;
-
-  let response: Response;
-  try {
-    response = await fetch(url);
-  } catch {
-    try {
-      response = await fetch('http://127.0.0.1:8000/api/banking/profiles');
-    } catch {
-      throw new Error(`Unable to fetch banking profiles from http://127.0.0.1:8000/api/banking/profiles.`);
-    }
-  }
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch banking profiles: HTTP ${response.status}`);
-  }
-
-  return response.json();
+  return fetchWithFallback<BankingSystemProfile[]>(
+    '/api/banking/profiles',
+    { method: 'GET' },
+    'Unable to fetch banking profiles from backend.'
+  );
 }
 
 export async function getBankingProfileById(id: string): Promise<BankingSystemProfile> {
-  const url = `${API_BASE}/api/banking/profiles/${encodeURIComponent(id)}`;
-
-  let response: Response;
-  try {
-    response = await fetch(url);
-  } catch {
-    try {
-      response = await fetch(`http://127.0.0.1:8000/api/banking/profiles/${encodeURIComponent(id)}`);
-    } catch {
-      throw new Error(`Unable to fetch profile ${id} from backend.`);
-    }
-  }
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch profile ${id}: HTTP ${response.status}`);
-  }
-
-  return response.json();
+  return fetchWithFallback<BankingSystemProfile>(
+    `/api/banking/profiles/${encodeURIComponent(id)}`,
+    { method: 'GET' },
+    `Unable to fetch banking profile "${id}" from backend.`
+  );
 }
 
 export async function getBankingRiskRankings(): Promise<BankingRiskAssessment[]> {
-  const url = `${API_BASE}/api/banking/risk`;
-
-  let response: Response;
-  try {
-    response = await fetch(url);
-  } catch {
-    try {
-      response = await fetch('http://127.0.0.1:8000/api/banking/risk');
-    } catch {
-      throw new Error(`Unable to fetch banking risk rankings from http://127.0.0.1:8000/api/banking/risk.`);
-    }
-  }
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch banking risk rankings: HTTP ${response.status}`);
-  }
-
-  return response.json();
+  return fetchWithFallback<BankingRiskAssessment[]>(
+    '/api/banking/risk',
+    { method: 'GET' },
+    'Unable to fetch banking risk rankings from backend.'
+  );
 }
 
 export async function getBankingUpgradePlan(): Promise<RankedUpgradePlan> {
-  const url = `${API_BASE}/api/banking/upgrade-plan`;
-
-  let response: Response;
-  try {
-    response = await fetch(url);
-  } catch {
-    try {
-      response = await fetch(
-        'http://127.0.0.1:8000/api/banking/upgrade-plan'
-      );
-    } catch {
-      throw new Error('Unable to fetch the banking upgrade plan from backend.');
-    }
-  }
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch banking upgrade plan: HTTP ${response.status}`);
-  }
-
-  return response.json();
+  return fetchWithFallback<RankedUpgradePlan>(
+    '/api/banking/upgrade-plan',
+    { method: 'GET' },
+    'Unable to fetch banking upgrade plan from backend.'
+  );
 }
 
 export async function getBankingProfileRisk(id: string): Promise<BankingRiskAssessment> {
-  const url = `${API_BASE}/api/banking/profiles/${encodeURIComponent(id)}/risk`;
-
-  let response: Response;
-  try {
-    response = await fetch(url);
-  } catch {
-    try {
-      response = await fetch(`http://127.0.0.1:8000/api/banking/profiles/${encodeURIComponent(id)}/risk`);
-    } catch {
-      throw new Error(`Unable to fetch risk assessment for profile ${id}.`);
-    }
-  }
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch risk for profile ${id}: HTTP ${response.status}`);
-  }
-
-  return response.json();
+  return fetchWithFallback<BankingRiskAssessment>(
+    `/api/banking/profiles/${encodeURIComponent(id)}/risk`,
+    { method: 'GET' },
+    `Unable to fetch risk assessment for profile "${id}".`
+  );
 }
 
 export async function simulateMigration(
   request: WhatIfMigrationRequest
 ): Promise<WhatIfMigrationResult> {
-  const url = `${API_BASE}/api/banking/risk/what-if`;
-
-  let response: Response;
-  try {
-    response = await fetch(url, {
+  return fetchWithFallback<WhatIfMigrationResult>(
+    '/api/banking/risk/what-if',
+    {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
-    });
-  } catch {
-    try {
-      response = await fetch('http://127.0.0.1:8000/api/banking/risk/what-if', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(request),
-      });
-    } catch {
-      throw new Error('Unable to connect to QuantumShield migration simulation service.');
-    }
-  }
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.detail || `Migration simulation failed with HTTP ${response.status}`
-    );
-  }
-
-  return response.json();
+    },
+    'Unable to connect to QuantumShield migration simulation service.'
+  );
 }
 
 export async function checkBackendHealth(): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/health`);
+    const res = await fetch(buildResolvedUrl('/api/health', API_BASE));
     if (res.ok) return true;
   } catch {
-    // Retry direct port
     try {
-      const res2 = await fetch('http://127.0.0.1:8000/api/health');
+      const res2 = await fetch(`${DIRECT_BACKEND_ORIGIN}/api/health`);
       return res2.ok;
     } catch {
       return false;
@@ -234,120 +292,91 @@ export async function checkBackendHealth(): Promise<boolean> {
 }
 
 // ==============================================================================
-// TASK 5: COMPREHENSIVE REPORT DOWNLOADS & AUDIT VERIFICATION
+// REPORT DOWNLOADS & AUDIT VERIFICATION
 // ==============================================================================
 
 export async function getBankingSystemJsonReport(
   systemId: string
 ): Promise<CompleteAssessmentReport> {
-  const path = `/api/banking/systems/${encodeURIComponent(systemId)}/report/json?include_ai=true`;
-
-  let response: Response;
-
-  try {
-    response = await fetch(`${API_BASE}${path}`);
-  } catch {
-    try {
-      response = await fetch(`http://127.0.0.1:8000${path}`);
-    } catch {
-      throw new Error('Unable to connect to the report service.');
-    }
-  }
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.detail || `JSON report request failed with HTTP ${response.status}`
-    );
-  }
-
-  return response.json();
+  return fetchWithFallback<CompleteAssessmentReport>(
+    `/api/banking/systems/${encodeURIComponent(systemId)}/report/json?include_ai=true`,
+    { method: 'GET' },
+    'Unable to connect to the report service.'
+  );
 }
 
 export async function getBankingSystemPdfReport(
   systemId: string
 ): Promise<Blob> {
-  const path = `/api/banking/systems/${encodeURIComponent(systemId)}/report/pdf?include_ai=true`;
+  return fetchBlobWithFallback(
+    `/api/banking/systems/${encodeURIComponent(systemId)}/report/pdf?include_ai=true`,
+    { method: 'GET' },
+    'Unable to connect to the PDF report service.'
+  );
+}
 
-  let response: Response;
-
-  try {
-    response = await fetch(`${API_BASE}${path}`);
-  } catch {
-    try {
-      response = await fetch(`http://127.0.0.1:8000${path}`);
-    } catch {
-      throw new Error('Unable to connect to the PDF report service.');
-    }
-  }
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.detail || `PDF report request failed with HTTP ${response.status}`
-    );
-  }
-
-  return response.blob();
+export async function getBankingSystemCBOM(
+  systemId: string
+): Promise<CBOMDocument> {
+  return fetchWithFallback<CBOMDocument>(
+    `/api/banking/systems/${encodeURIComponent(systemId)}/cbom`,
+    { method: 'GET' },
+    'Unable to connect to the CBOM service.'
+  );
 }
 
 export async function verifyAuditRecord(
   record: AuditRecord
 ): Promise<AuditVerificationResult> {
-  const path = '/api/audit/verify';
-  const options: RequestInit = {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  return fetchWithFallback<AuditVerificationResult>(
+    '/api/audit/verify',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ record }),
     },
-    body: JSON.stringify({ record }),
-  };
+    'Unable to connect to the audit verification service.'
+  );
+}
 
-  let response: Response;
-
-  try {
-    response = await fetch(`${API_BASE}${path}`, options);
-  } catch {
-    try {
-      response = await fetch(`http://127.0.0.1:8000${path}`, options);
-    } catch {
-      throw new Error('Unable to connect to the audit verification service.');
-    }
+export async function getAuditLedger(
+  limit: number = 50,
+  offset: number = 0,
+  systemId?: string
+): Promise<AuditLedgerResponse> {
+  const query = new URLSearchParams({
+    limit: limit.toString(),
+    offset: offset.toString(),
+  });
+  if (systemId) {
+    query.append('system_id', systemId);
   }
+  return fetchWithFallback<AuditLedgerResponse>(
+    `/api/audit/ledger?${query.toString()}`,
+    { method: 'GET' },
+    'Unable to connect to the audit ledger service.'
+  );
+}
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.detail || `Audit verification failed with HTTP ${response.status}`
-    );
-  }
-
-  return response.json();
+export async function getAuditHead(): Promise<AuditHeadResponse> {
+  return fetchWithFallback<AuditHeadResponse>(
+    '/api/audit/head',
+    { method: 'GET' },
+    'Unable to connect to the audit head service.'
+  );
 }
 
 // ==============================================================================
-// TASK 6: UPLOADED ARTIFACT SCANNING
+// UPLOADED ARTIFACT SCANNING
 // ==============================================================================
 
-const MAX_UPLOAD_FILE_SIZE = 1024 * 1024;
-const MAX_UPLOAD_TOTAL_SIZE = 5 * 1024 * 1024;
-const MAX_UPLOAD_FILES = 20;
-
-async function readUploadFiles(files: File[]): Promise<
-  { name: string; content: string }[]
-> {
-  if (files.length === 0 || files.length > MAX_UPLOAD_FILES) {
-    throw new Error('Select between 1 and 20 files.');
-  }
-
-  const totalSize = files.reduce((total, file) => total + file.size, 0);
-
-  if (files.some((file) => file.size > MAX_UPLOAD_FILE_SIZE)) {
-    throw new Error('Each file must be 1 MiB or smaller.');
-  }
-
-  if (totalSize > MAX_UPLOAD_TOTAL_SIZE) {
-    throw new Error('Combined file size must not exceed 5 MiB.');
+async function readUploadFiles(
+  files: File[],
+  mode: 'config' | 'code' | 'certificate' = 'config'
+): Promise<{ name: string; content: string }[]> {
+  const validation = validateUploadFiles(files, mode);
+  if (!validation.isValid) {
+    throw new Error(validation.error || 'Upload validation failed.');
   }
 
   try {
@@ -362,148 +391,89 @@ async function readUploadFiles(files: File[]): Promise<
   }
 }
 
-async function postUploadJson<T>(
-  path: string,
-  payload: unknown,
-  serviceName: string
-): Promise<T> {
-  const options: RequestInit = {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  };
-
-  let response: Response;
-
-  try {
-    response = await fetch(`${API_BASE}${path}`, options);
-  } catch {
-    try {
-      response = await fetch(`http://127.0.0.1:8000${path}`, options);
-    } catch {
-      throw new Error(`Unable to connect to the ${serviceName} service.`);
-    }
-  }
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.detail ||
-      errorData.error ||
-      `${serviceName} failed with HTTP ${response.status}`
-    );
-  }
-
-  return response.json();
-}
-
 export async function scanUploadedConfig(
   files: File[]
 ): Promise<ArtifactFindingsResponse> {
-  const uploadedFiles = await readUploadFiles(files);
-
-  return postUploadJson<ArtifactFindingsResponse>(
+  const uploadedFiles = await readUploadFiles(files, 'config');
+  return fetchWithFallback<ArtifactFindingsResponse>(
     '/api/scan/config',
-    { files: uploadedFiles },
-    'Configuration scan'
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: uploadedFiles }),
+    },
+    'Unable to connect to the Configuration scan service.'
   );
 }
 
 export async function scanUploadedCode(
   files: File[]
 ): Promise<ArtifactFindingsResponse> {
-  const uploadedFiles = await readUploadFiles(files);
-
-  return postUploadJson<ArtifactFindingsResponse>(
+  const uploadedFiles = await readUploadFiles(files, 'code');
+  return fetchWithFallback<ArtifactFindingsResponse>(
     '/api/scan/code',
-    { files: uploadedFiles },
-    'Source-code scan'
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ files: uploadedFiles }),
+    },
+    'Unable to connect to the Source-code scan service.'
   );
 }
 
 export async function scanUploadedCertificate(
   file: File
 ): Promise<UploadedCertificateResponse> {
-  const uploadedFiles = await readUploadFiles([file]);
-
-  return postUploadJson<UploadedCertificateResponse>(
+  const uploadedFiles = await readUploadFiles([file], 'certificate');
+  return fetchWithFallback<UploadedCertificateResponse>(
     '/api/scan/cert',
-    uploadedFiles[0],
-    'Certificate scan'
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(uploadedFiles[0]),
+    },
+    'Unable to connect to the Certificate scan service.'
   );
 }
 
 // ==============================================================================
-// TASK 10: AI-POWERED QUANTUM READINESS INTELLIGENCE API CLIENT
+// AI READINESS INTELLIGENCE & TELEMETRY
 // ==============================================================================
 
-async function postAIJson<T>(endpoint: string, payload: unknown, fallbackMessage: string): Promise<T> {
-  const url = `${API_BASE}${endpoint}`;
-  let response: Response;
-
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch {
-    try {
-      response = await fetch(`http://127.0.0.1:8000${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-    } catch {
-      throw new Error(fallbackMessage);
-    }
-  }
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || errorData.error || `Request failed with HTTP ${response.status}`);
-  }
-
-  return response.json();
-}
-
 export async function getAIStatus(): Promise<AIStatus> {
-  const url = `${API_BASE}/api/ai/status`;
-  let response: Response;
-
   try {
-    response = await fetch(url);
-  } catch {
-    try {
-      response = await fetch('http://127.0.0.1:8000/api/ai/status');
-    } catch {
-      return {
-        is_available: false,
-        provider: 'none',
-        message: 'Unable to connect to QuantumShield AI service.',
-      };
-    }
-  }
-
-  if (!response.ok) {
+    return await fetchWithFallback<AIStatus>(
+      '/api/ai/status',
+      { method: 'GET' },
+      'AI service status unavailable.'
+    );
+  } catch (err: unknown) {
     return {
       is_available: false,
       provider: 'none',
-      message: `AI service status returned HTTP ${response.status}`,
+      message: err instanceof Error ? err.message : 'Unable to connect to QuantumShield AI service.',
     };
   }
+}
 
-  return response.json();
+export async function getAIBudget(): Promise<AIBudgetTelemetry> {
+  return fetchWithFallback<AIBudgetTelemetry>(
+    '/api/ai/budget',
+    { method: 'GET' },
+    'Unable to fetch AI budget and rate-limit telemetry from backend.'
+  );
 }
 
 export async function explainFinding(
   payload: FindingExplanationRequest
 ): Promise<AIExplanationResult<FindingExplanationResponse>> {
-  return postAIJson<AIExplanationResult<FindingExplanationResponse>>(
+  return fetchWithFallback<AIExplanationResult<FindingExplanationResponse>>(
     '/api/ai/explain/finding',
-    payload,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
     'Failed to contact AI service for finding explanation.'
   );
 }
@@ -511,9 +481,13 @@ export async function explainFinding(
 export async function explainBankingRisk(
   payload: BankingRiskExplanationRequest
 ): Promise<AIExplanationResult<BankingRiskExplanationResponse>> {
-  return postAIJson<AIExplanationResult<BankingRiskExplanationResponse>>(
+  return fetchWithFallback<AIExplanationResult<BankingRiskExplanationResponse>>(
     '/api/ai/explain/banking-risk',
-    payload,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
     'Failed to contact AI service for banking risk explanation.'
   );
 }
@@ -521,9 +495,13 @@ export async function explainBankingRisk(
 export async function adviseMigration(
   payload: MigrationAdvisoryRequest
 ): Promise<AIExplanationResult<MigrationAdvisoryResponse>> {
-  return postAIJson<AIExplanationResult<MigrationAdvisoryResponse>>(
+  return fetchWithFallback<AIExplanationResult<MigrationAdvisoryResponse>>(
     '/api/ai/advisory/migration',
-    payload,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
     'Failed to contact AI service for migration advisory.'
   );
 }
@@ -531,9 +509,13 @@ export async function adviseMigration(
 export async function explainReport(
   payload: ReportExplanationRequest
 ): Promise<AIExplanationResult<ReportExplanationResponse>> {
-  return postAIJson<AIExplanationResult<ReportExplanationResponse>>(
+  return fetchWithFallback<AIExplanationResult<ReportExplanationResponse>>(
     '/api/ai/explain/report',
-    payload,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
     'Failed to contact AI service for report explanation.'
   );
 }

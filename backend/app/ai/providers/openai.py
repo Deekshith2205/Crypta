@@ -14,6 +14,7 @@ from app.ai.providers.base import (
     AIProviderRateLimitError,
     AIProviderUnavailableError,
 )
+from app.ai.providers.resilience import execute_http_with_resilience
 
 logger = logging.getLogger("quantumshield.ai.openai")
 
@@ -67,38 +68,24 @@ class OpenAIProvider(BaseAIProvider):
             "response_format": {"type": "json_object"},
         }
 
-        try:
+        async def _call() -> httpx.Response:
             async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-                response = await client.post(
+                return await client.post(
                     OPENAI_CHAT_URL,
                     headers=headers,
                     json=payload,
                 )
 
-            if response.status_code == 429:
-                raise AIProviderRateLimitError("OpenAI quota or rate limit exceeded.")
+        response = await execute_http_with_resilience(
+            _call,
+            provider_name=self.provider_name,
+        )
 
-            if response.status_code != 200:
-                logger.error(
-                    "OpenAI API returned HTTP status %s.",
-                    response.status_code,
-                )
-                raise AIProviderError(f"OpenAI API request failed with HTTP {response.status_code}")
+        data = response.json()
+        choices = data.get("choices") or []
+        if not choices:
+            raise AIProviderError("OpenAI API returned no completion choices.")
 
-            data = response.json()
-            choices = data.get("choices") or []
-            if not choices:
-                raise AIProviderError("OpenAI API returned no completion choices.")
-
-            message = choices[0].get("message", {})
-            content = message.get("content", "").strip()
-            return content
-
-        except httpx.TimeoutException as exc:
-            raise AIProviderTimeoutError(f"OpenAI API call timed out after {self._timeout_seconds}s") from exc
-        except (AIProviderError, AIProviderUnavailableError, AIProviderRateLimitError, AIProviderTimeoutError):
-            raise
-        except Exception as exc:
-            raise AIProviderError(
-                "Unexpected error communicating with OpenAI API."
-            ) from exc
+        message = choices[0].get("message", {})
+        content = message.get("content", "").strip()
+        return content

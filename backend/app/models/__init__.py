@@ -27,6 +27,7 @@ from app.models.zero_trust import (
     ZeroTrustControl,
     ZeroTrustAssessment,
     build_default_zero_trust_assessment,
+    build_zero_trust_assessment,
 )
 
 from app.models.risk import RiskDimensions
@@ -51,5 +52,6 @@ __all__ = [
     "ZeroTrustControl",
     "ZeroTrustAssessment",
     "build_default_zero_trust_assessment",
+    "build_zero_trust_assessment",
     "RiskDimensions",
 ]

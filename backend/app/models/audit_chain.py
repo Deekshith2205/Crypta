@@ -2,8 +2,25 @@
 Provides cryptographic tamper evidence and verifiable integrity chains for assessments.
 """
 
+from enum import Enum
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field
+
+
+class AuditVerificationStatus(str, Enum):
+    VALID = "VALID"
+    LOCALLY_VERIFIED = "LOCALLY_VERIFIED"
+    EXTERNALLY_ANCHORED = "EXTERNALLY_ANCHORED"
+    EXTERNAL_ANCHOR_UNAVAILABLE = "EXTERNAL_ANCHOR_UNAVAILABLE"
+    EXTERNAL_ANCHOR_INVALID = "EXTERNAL_ANCHOR_INVALID"
+    INVALID_SIGNATURE = "INVALID_SIGNATURE"
+    PAYLOAD_HASH_MISMATCH = "PAYLOAD_HASH_MISMATCH"
+    CHAIN_BROKEN = "CHAIN_BROKEN"
+    RECORD_NOT_IN_LEDGER = "RECORD_NOT_IN_LEDGER"
+    LEDGER_CORRUPTED = "LEDGER_CORRUPTED"
+    LEDGER_ROLLBACK_DETECTED = "LEDGER_ROLLBACK_DETECTED"
+    LEDGER_SUFFIX_TRUNCATION_DETECTED = "LEDGER_SUFFIX_TRUNCATION_DETECTED"
+    VERIFICATION_ERROR = "VERIFICATION_ERROR"
 
 
 class AuditRecord(BaseModel):
@@ -16,6 +33,7 @@ class AuditRecord(BaseModel):
     previous_hash: str = Field(..., description="SHA-256 hash of previous audit record ('0'*64 for genesis)")
     current_hash: str = Field(..., description="SHA-256 hash of (canonical_assessment + previous_hash)")
     timestamp: str = Field(..., description="ISO 8601 generation timestamp")
+    signature: str = Field(default="", description="HMAC-SHA256 signature of the audit record")
     schema_version: str = Field(default="1.0.0", description="Audit schema version")
     canonical_payload: Optional[str] = Field(default=None, description="Canonical JSON string of assessment payload")
 
@@ -23,6 +41,7 @@ class AuditRecord(BaseModel):
 class AuditVerificationResult(BaseModel):
     """Result of verifying a single audit record or chain."""
     valid: bool = Field(..., description="True if cryptographic verification succeeded")
+    status: str = Field(default=AuditVerificationStatus.VALID.value, description="Explicit verification outcome status code")
     record_id: Optional[str] = Field(default=None, description="Record identifier verified")
     error: Optional[str] = Field(default=None, description="Reason for validation failure if invalid")
     records_checked: int = Field(default=1, description="Number of chained records verified")

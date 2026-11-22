@@ -12,6 +12,8 @@ from xml.sax.saxutils import escape
 from app.models.banking import BankingAsset
 from app.models.profiles import get_synthetic_profile_by_id, get_synthetic_banking_profiles
 from app.models.report import CompleteAssessmentReport
+from app.models.risk import KeyChainStatus
+from app.models.zero_trust import build_zero_trust_assessment
 from app.services.banking_risk_engine import evaluate_banking_risk
 from app.services.migration_impact_engine import evaluate_migration_impact
 from app.services.upgrade_planner import (
@@ -56,7 +58,11 @@ def generate_system_cbom(system_id: str) -> Dict[str, Any]:
     }
 
 
-def build_complete_json_report(system_id: str) -> CompleteAssessmentReport:
+def build_complete_json_report(
+    system_id: str,
+    seal_audit: bool = False,
+    audit_service: Optional[Any] = None,
+) -> CompleteAssessmentReport:
     """
     Assembles a complete, machine-readable assessment report for a banking system,
     sealed with a cryptographic audit hash chain record.
@@ -251,7 +257,55 @@ def build_complete_json_report(system_id: str) -> CompleteAssessmentReport:
         ],
     }
 
-    # 15. Report Metadata
+    # 15. Zero Trust Architecture (NIST SP 800-207)
+    zero_trust_obj = build_zero_trust_assessment(
+        system_id,
+        tls_version=(profile.cryptography.tls_versions[0] if profile.cryptography and profile.cryptography.tls_versions else "TLSv1.3"),
+        asset=profile,
+    )
+    zero_trust_dict = {
+        "summary": zero_trust_obj.compute_zero_trust_summary(),
+        "controls": [c.model_dump() for c in zero_trust_obj.get_all_controls()],
+    }
+
+    # 16. Regulatory & Standards Compliance Mappings
+    compliance_mappings = {
+        "nist_sp_800_227": {
+            "standard": "NIST SP 800-227 (Recommendations for Cryptographic Key Management & Transition)",
+            "status": "COMPLIANT" if risk.key_protection.status == KeyChainStatus.QUANTUM_READY else "TRANSITION_REQUIRED",
+            "key_establishment": "FIPS 203 ML-KEM-768 or Hybrid X25519MLKEM768 required for quantum resistance",
+            "digital_signatures": "FIPS 204 ML-DSA-65 or FIPS 205 SLH-DSA required for post-quantum authentication",
+            "findings_count": len(quantum_findings),
+        },
+        "cnsa_2_0": {
+            "standard": "Commercial National Security Algorithm Suite 2.0 (CNSA 2.0)",
+            "status": "COMPLIANT" if (risk.key_protection.status == KeyChainStatus.QUANTUM_READY and "AES-256" in (chain.data_encryption if chain and chain.data_encryption else "")) else "NON_COMPLIANT",
+            "symmetric_encryption": "AES-256 (Grover-resilient 128-bit security)",
+            "asymmetric_kem": "ML-KEM-1024 or ML-KEM-768",
+            "asymmetric_signatures": "ML-DSA-87 or ML-DSA-65 or SLH-DSA",
+            "mandate_timeline": "Software/firmware migration required by 2030; legacy phased out by 2033",
+        },
+        "fips_203": {
+            "standard": "FIPS 203 (Module-Lattice-Based Key-Encapsulation Mechanism - ML-KEM)",
+            "target": "ML-KEM-768 / ML-KEM-1024",
+            "current_status": risk.key_protection.key_wrapping_status,
+            "migrated": "ML-KEM" in (chain.key_wrapping.upper() if chain and chain.key_wrapping else ""),
+        },
+        "fips_204": {
+            "standard": "FIPS 204 (Module-Lattice-Based Digital Signature Algorithm - ML-DSA)",
+            "target": "ML-DSA-65 / ML-DSA-87",
+            "current_status": risk.key_protection.authentication_status,
+            "migrated": "ML-DSA" in (chain.authentication.upper() if chain and chain.authentication else ""),
+        },
+        "fips_205": {
+            "standard": "FIPS 205 (Stateless Hash-Based Digital Signature Algorithm - SLH-DSA)",
+            "target": "SLH-DSA-128s / SLH-DSA-128f",
+            "alternative_signature": "Stateless hash signatures for root CA and offline code signing",
+            "migrated": "SLH-DSA" in (chain.authentication.upper() if chain and chain.authentication else ""),
+        },
+    }
+
+    # 17. Report Metadata
     report_id = f"QSR-{profile.id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     rep_meta = {
         "report_id": report_id,
@@ -259,11 +313,11 @@ def build_complete_json_report(system_id: str) -> CompleteAssessmentReport:
         "system_name": profile.name,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "engine_version": "QuantumShield v2.5.0-BankingEngine",
-        "spec_conformance": ["NIST SP 800-227", "RFC 8785", "CycloneDX 1.7"],
+        "spec_conformance": ["NIST SP 800-227", "RFC 8785", "CycloneDX 1.7", "CNSA 2.0", "FIPS 203", "FIPS 204", "FIPS 205"],
         "disclaimer": "QuantumShield audit analysis is for authorized financial risk evaluation.",
     }
 
-    # 16. Build preliminary dict for canonical hashing
+    # 18. Build preliminary dict for canonical hashing
     payload_for_seal = {
         "system": system_dict,
         "quantum_posture": quantum_posture,
@@ -276,12 +330,25 @@ def build_complete_json_report(system_id: str) -> CompleteAssessmentReport:
         "timestamp": rep_meta["timestamp"],
     }
 
-    # 17. Cryptographic sealing via AuditChainService
-    audit_record = DEFAULT_AUDIT_CHAIN_SERVICE.create_audit_record(
-        assessment_data=payload_for_seal,
-        assessment_id=report_id,
-        store=True,
-    )
+    # 19. Cryptographic sealing via AuditChainService
+    svc = audit_service or DEFAULT_AUDIT_CHAIN_SERVICE
+    if seal_audit:
+        audit_record = svc.create_audit_record(
+            assessment_data=payload_for_seal,
+            assessment_id=system_id,
+            store=True,
+            auto_checkpoint=True,
+        )
+    else:
+        existing = svc.get_latest_record_for_system(system_id) if hasattr(svc, "get_latest_record_for_system") else None
+        if existing is not None:
+            audit_record = existing
+        else:
+            audit_record = svc.create_audit_record(
+                assessment_data=payload_for_seal,
+                assessment_id=system_id,
+                store=False,
+            )
 
     return CompleteAssessmentReport(
         metadata=rep_meta,
@@ -305,6 +372,8 @@ def build_complete_json_report(system_id: str) -> CompleteAssessmentReport:
         what_if_results=what_if_dict,
         audit=audit_record,
         audit_metadata=audit_record,
+        zero_trust=zero_trust_dict,
+        compliance_mappings=compliance_mappings,
     )
 
 
@@ -385,7 +454,7 @@ def generate_pdf_report(system_id: str, report: Optional[CompleteAssessmentRepor
     header_data = [
         [
             Paragraph("<b>QUANTUMSHIELD AUDIT REPORT</b><br/><font size=8 color='#64748b'>Enterprise Post-Quantum Cryptographic Assessment</font>", title_style),
-            Paragraph(f"<b>System:</b> {report.system.get('name')}<br/><b>ID:</b> {report.system.get('id')}<br/><b>Date:</b> {report.metadata.get('timestamp')[:10]}", body_style),
+            Paragraph(f"<b>System:</b> {escape(str(report.system.get('name', '')))}<br/><b>ID:</b> {escape(str(report.system.get('id', '')))}<br/><b>Date:</b> {escape(str(report.metadata.get('timestamp', ''))[:10])}", body_style),
         ]
     ]
     header_table = Table(header_data, colWidths=[340, 200])
@@ -400,10 +469,10 @@ def generate_pdf_report(system_id: str, report: Optional[CompleteAssessmentRepor
     elements.append(Paragraph("1. Executive Summary & Migration Priority", h1_style))
     exec_p = report.executive_summary
     exec_data = [
-        [Paragraph(f"<b>Verdict:</b> {exec_p.get('readiness_verdict')}", body_style)],
-        [Paragraph(f"<b>Primary Cryptographic Concern:</b> {exec_p.get('primary_concern')}", body_style)],
-        [Paragraph(f"<b>Recommended Strategic Planning Window:</b> {exec_p.get('recommended_planning_window')}", body_style)],
-        [Paragraph(f"<b>Business Criticality:</b> {exec_p.get('business_criticality')} | <b>Data Sensitivity:</b> {exec_p.get('data_sensitivity')}", body_style)],
+        [Paragraph(f"<b>Verdict:</b> {escape(str(exec_p.get('readiness_verdict', '')))}", body_style)],
+        [Paragraph(f"<b>Primary Cryptographic Concern:</b> {escape(str(exec_p.get('primary_concern', '')))}", body_style)],
+        [Paragraph(f"<b>Recommended Strategic Planning Window:</b> {escape(str(exec_p.get('recommended_planning_window', '')))}", body_style)],
+        [Paragraph(f"<b>Business Criticality:</b> {escape(str(exec_p.get('business_criticality', '')))} | <b>Data Sensitivity:</b> {escape(str(exec_p.get('data_sensitivity', '')))}", body_style)],
     ]
     exec_table = Table(exec_data, colWidths=[540])
     exec_table.setStyle(TableStyle([
@@ -424,7 +493,7 @@ def generate_pdf_report(system_id: str, report: Optional[CompleteAssessmentRepor
         ["Key Wrapping PQC Status", str(qp.get("key_wrapping_pqc_status"))],
         ["Symmetric Grover Security", str(qp.get("grover_aes256_status"))],
     ]
-    q_table = Table([[Paragraph(f"<b>{k}</b>", body_style), Paragraph(v, body_style)] for k, v in q_data], colWidths=[180, 360])
+    q_table = Table([[Paragraph(f"<b>{escape(str(k))}</b>", body_style), Paragraph(escape(str(v)), body_style)] for k, v in q_data], colWidths=[180, 360])
     q_table.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 1, border_gray),
         ("INNERGRID", (0, 0), (-1, -1), 0.5, border_gray),
@@ -443,7 +512,7 @@ def generate_pdf_report(system_id: str, report: Optional[CompleteAssessmentRepor
         ["Weak Hash Primitives (MD5/SHA-1)", "YES - Collision Vulnerability" if cp.get("weak_hashing_detected") else "None Detected"],
         ["Insecure Electronic Codebook (ECB)", "YES - Semantic Insecurity" if cp.get("insecure_modes_detected") else "None Detected"],
     ]
-    c_table = Table([[Paragraph(f"<b>{k}</b>", body_style), Paragraph(v, body_style)] for k, v in c_data], colWidths=[180, 360])
+    c_table = Table([[Paragraph(f"<b>{escape(str(k))}</b>", body_style), Paragraph(escape(str(v)), body_style)] for k, v in c_data], colWidths=[180, 360])
     c_table.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 1, border_gray),
         ("INNERGRID", (0, 0), (-1, -1), 0.5, border_gray),
@@ -505,17 +574,15 @@ def generate_pdf_report(system_id: str, report: Optional[CompleteAssessmentRepor
     elements.append(Paragraph("6. Key Protection Chain Hierarchy Analysis", h1_style))
     kchain = report.key_protection_chain
     chain_data = [
-        ["Hierarchy Tier", "Assigned Mechanism / Primitive", "Vulnerability Assessment"],
-        ["Tier 1: Data Encryption", str(kchain.get("tier_1_data_encryption")), "Adequate AES-256 Payload Protection"],
-        ["Tier 2: Key Wrapping", str(kchain.get("tier_2_key_wrapping")), "Asymmetric KEK (Shor factoring target)"],
-        ["Tier 3: Key Storage", str(kchain.get("tier_3_key_storage")), "Hardware or KMS Isolation Boundary"],
-        ["Tier 4: Authentication", str(kchain.get("tier_4_authentication")), "Master Identity Signature Authority"],
+        [Paragraph("<b>Hierarchy Tier</b>", body_style), Paragraph("<b>Assigned Mechanism / Primitive</b>", body_style), Paragraph("<b>Vulnerability Assessment</b>", body_style)],
+        [Paragraph("Tier 1: Data Encryption", body_style), Paragraph(escape(str(kchain.get("tier_1_data_encryption", ""))), body_style), Paragraph("Adequate AES-256 Payload Protection", body_style)],
+        [Paragraph("Tier 2: Key Wrapping", body_style), Paragraph(escape(str(kchain.get("tier_2_key_wrapping", ""))), body_style), Paragraph("Asymmetric KEK (Shor factoring target)", body_style)],
+        [Paragraph("Tier 3: Key Storage", body_style), Paragraph(escape(str(kchain.get("tier_3_key_storage", ""))), body_style), Paragraph("Hardware or KMS Isolation Boundary", body_style)],
+        [Paragraph("Tier 4: Authentication", body_style), Paragraph(escape(str(kchain.get("tier_4_authentication", ""))), body_style), Paragraph("Master Identity Signature Authority", body_style)],
     ]
     chain_table = Table(chain_data, colWidths=[140, 190, 210])
     chain_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), bg_light),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("BOX", (0, 0), (-1, -1), 1, border_gray),
         ("INNERGRID", (0, 0), (-1, -1), 0.5, border_gray),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
@@ -528,9 +595,9 @@ def generate_pdf_report(system_id: str, report: Optional[CompleteAssessmentRepor
     elements.append(Paragraph("7. Migration Impact Analysis", h1_style))
     m = report.migration_impact
     impact_data = [
-        [Paragraph("<b>Latency Sensitivity:</b>", body_style), Paragraph(f"{m.latency_sensitivity} — {m.latency_rationale}", body_style)],
-        [Paragraph("<b>PQC Packet Size Impact:</b>", body_style), Paragraph(f"{m.pqc_size_impact} — {m.pqc_size_rationale}", body_style)],
-        [Paragraph("<b>HSM Dependency:</b>", body_style), Paragraph(f"{m.hsm_dependency} — {m.hsm_rationale}", body_style)],
+        [Paragraph("<b>Latency Sensitivity:</b>", body_style), Paragraph(f"{escape(str(m.latency_sensitivity))} — {escape(str(m.latency_rationale))}", body_style)],
+        [Paragraph("<b>PQC Packet Size Impact:</b>", body_style), Paragraph(f"{escape(str(m.pqc_size_impact))} — {escape(str(m.pqc_size_rationale))}", body_style)],
+        [Paragraph("<b>HSM Dependency:</b>", body_style), Paragraph(f"{escape(str(m.hsm_dependency))} — {escape(str(m.hsm_rationale))}", body_style)],
     ]
     impact_table = Table(impact_data, colWidths=[140, 400])
     impact_table.setStyle(TableStyle([
@@ -546,8 +613,8 @@ def generate_pdf_report(system_id: str, report: Optional[CompleteAssessmentRepor
     elements.append(Paragraph("8. Cryptographic Agility Evaluation", h1_style))
     ca = report.crypto_agility
     ca_data = [
-        [Paragraph("<b>Agility Rating:</b>", body_style), Paragraph(str(ca.get("agility_rating")), body_style)],
-        [Paragraph("<b>Agility Rationale:</b>", body_style), Paragraph(str(ca.get("agility_rationale")), body_style)],
+        [Paragraph("<b>Agility Rating:</b>", body_style), Paragraph(escape(str(ca.get("agility_rating", ""))), body_style)],
+        [Paragraph("<b>Agility Rationale:</b>", body_style), Paragraph(escape(str(ca.get("agility_rationale", ""))), body_style)],
     ]
     ca_table = Table(ca_data, colWidths=[140, 400])
     ca_table.setStyle(TableStyle([
@@ -602,7 +669,7 @@ def generate_pdf_report(system_id: str, report: Optional[CompleteAssessmentRepor
         ["Projected Priority Score", f"{wi.get('projected_priority_score')}/100 ({wi.get('projected_priority_band')})"],
         ["Risk Mitigation", str(wi.get("quantum_risk_resolved"))],
     ]
-    wi_table = Table([[Paragraph(f"<b>{k}</b>", body_style), Paragraph(v, body_style)] for k, v in wi_data], colWidths=[180, 360])
+    wi_table = Table([[Paragraph(f"<b>{escape(str(k))}</b>", body_style), Paragraph(escape(str(v)), body_style)] for k, v in wi_data], colWidths=[180, 360])
     wi_table.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 1, border_gray),
         ("INNERGRID", (0, 0), (-1, -1), 0.5, border_gray),
@@ -616,10 +683,10 @@ def generate_pdf_report(system_id: str, report: Optional[CompleteAssessmentRepor
     elements.append(Paragraph("12. Tamper-Evident Audit Hash Chain Integrity", h1_style))
     rec = report.audit
     audit_data = [
-        [Paragraph("<b>Record UUID:</b>", body_style), Paragraph(rec.record_id, mono_style)],
-        [Paragraph("<b>Canonical Payload SHA-256:</b>", body_style), Paragraph(rec.assessment_hash, mono_style)],
-        [Paragraph("<b>Previous Record Hash:</b>", body_style), Paragraph(rec.previous_hash, mono_style)],
-        [Paragraph("<b>Chained Hash:</b>", body_style), Paragraph(rec.current_hash, mono_style)],
+        [Paragraph("<b>Record UUID:</b>", body_style), Paragraph(escape(str(rec.record_id)), mono_style)],
+        [Paragraph("<b>Canonical Payload SHA-256:</b>", body_style), Paragraph(escape(str(rec.assessment_hash)), mono_style)],
+        [Paragraph("<b>Previous Record Hash:</b>", body_style), Paragraph(escape(str(rec.previous_hash)), mono_style)],
+        [Paragraph("<b>Chained Hash:</b>", body_style), Paragraph(escape(str(rec.current_hash)), mono_style)],
         [Paragraph("<b>RFC 8785 Proof:</b>", body_style), Paragraph("Canonical JSON serialization guarantees bit-level immutability across ledger records.", body_style)],
     ]
     audit_table = Table(audit_data, colWidths=[160, 380])
@@ -632,10 +699,75 @@ def generate_pdf_report(system_id: str, report: Optional[CompleteAssessmentRepor
     ]))
     elements.append(audit_table)
 
-    # 13. AI Advisory (if present)
+    # 13. Regulatory & Standards Compliance Mappings
+    if getattr(report, "compliance_mappings", None):
+        elements.append(Spacer(1, 6))
+        elements.append(Paragraph("13. Regulatory & Standards Compliance Mappings", h1_style))
+        comp_rows = [
+            [
+                Paragraph("<b>Standard</b>", body_style),
+                Paragraph("<b>Compliance Status</b>", body_style),
+                Paragraph("<b>Mandate / Recommended Transition Target</b>", body_style),
+            ]
+        ]
+        mappings = report.compliance_mappings
+        # NIST SP 800-227
+        if "nist_sp_800_227" in mappings:
+            n = mappings["nist_sp_800_227"]
+            comp_rows.append([
+                Paragraph(escape(str(n.get("standard", "NIST SP 800-227"))), body_style),
+                Paragraph(f"<b>{escape(str(n.get('status', 'TRANSITION_REQUIRED')))}</b>", body_style),
+                Paragraph(f"KEM: {escape(str(n.get('key_establishment', '')))}<br/>Signatures: {escape(str(n.get('digital_signatures', '')))}", body_style),
+            ])
+        # CNSA 2.0
+        if "cnsa_2_0" in mappings:
+            c = mappings["cnsa_2_0"]
+            comp_rows.append([
+                Paragraph(escape(str(c.get("standard", "CNSA 2.0"))), body_style),
+                Paragraph(f"<b>{escape(str(c.get('status', 'NON_COMPLIANT')))}</b>", body_style),
+                Paragraph(f"Symmetric: {escape(str(c.get('symmetric_encryption', 'AES-256')))}<br/>Timeline: {escape(str(c.get('mandate_timeline', '2030-2033')))}", body_style),
+            ])
+        # FIPS 203
+        if "fips_203" in mappings:
+            f203 = mappings["fips_203"]
+            status_text = "MIGRATED" if f203.get("migrated") else "PENDING_MIGRATION"
+            comp_rows.append([
+                Paragraph(escape(str(f203.get("standard", "FIPS 203 (ML-KEM)"))), body_style),
+                Paragraph(f"<b>{status_text}</b>", body_style),
+                Paragraph(f"Target: {escape(str(f203.get('target', 'ML-KEM-768')))}", body_style),
+            ])
+        # FIPS 204
+        if "fips_204" in mappings:
+            f204 = mappings["fips_204"]
+            status_text = "MIGRATED" if f204.get("migrated") else "PENDING_MIGRATION"
+            comp_rows.append([
+                Paragraph(escape(str(f204.get("standard", "FIPS 204 (ML-DSA)"))), body_style),
+                Paragraph(f"<b>{status_text}</b>", body_style),
+                Paragraph(f"Target: {escape(str(f204.get('target', 'ML-DSA-65')))}", body_style),
+            ])
+        # FIPS 205
+        if "fips_205" in mappings:
+            f205 = mappings["fips_205"]
+            status_text = "MIGRATED" if f205.get("migrated") else "PENDING_MIGRATION"
+            comp_rows.append([
+                Paragraph(escape(str(f205.get("standard", "FIPS 205 (SLH-DSA)"))), body_style),
+                Paragraph(f"<b>{status_text}</b>", body_style),
+                Paragraph(f"Target: {escape(str(f205.get('target', 'SLH-DSA-128s')))}", body_style),
+            ])
+        comp_table = Table(comp_rows, colWidths=[170, 110, 260])
+        comp_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), bg_light),
+            ("BOX", (0, 0), (-1, -1), 1, border_gray),
+            ("INNERGRID", (0, 0), (-1, -1), 0.5, border_gray),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(comp_table)
+
+    # 14. AI Advisory (if present)
     if getattr(report, "ai_advisory", None):
         elements.append(Spacer(1, 6))
-        elements.append(Paragraph("13. AI Advisory — Informational Explanation", h1_style))
+        elements.append(Paragraph("14. AI Advisory — Informational Explanation", h1_style))
 
         ai_data = [
             [
@@ -661,12 +793,12 @@ def generate_pdf_report(system_id: str, report: Optional[CompleteAssessmentRepor
                     Paragraph(escape(str(exec_s["high_level_actions"])), body_style),
                 ])
 
-        tech_s = report.ai_advisory.get("technical_summary", {})
-        if isinstance(tech_s, dict) and tech_s.get("algorithm_migration"):
-            ai_data.append([
-                Paragraph("<b>Technical Direction:</b>", body_style),
-                Paragraph(escape(str(tech_s["algorithm_migration"])), body_style),
-            ])
+            tech_s = report.ai_advisory.get("technical_summary", {})
+            if isinstance(tech_s, dict) and tech_s.get("algorithm_migration"):
+                ai_data.append([
+                    Paragraph("<b>Technical Direction:</b>", body_style),
+                    Paragraph(escape(str(tech_s["algorithm_migration"])), body_style),
+                ])
 
         disclaimer = report.ai_advisory.get(
             "advisory_disclaimer",

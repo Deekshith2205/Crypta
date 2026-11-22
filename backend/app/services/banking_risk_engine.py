@@ -166,7 +166,10 @@ def analyze_key_protection_chain(chain: Optional[KeyProtectionChain]) -> KeyChai
             key_storage_status="UNKNOWN",
             authentication_status="UNKNOWN",
             primary_migration_dependencies=[],
-            notes="No key-protection hierarchy evidence declared or observable from external vantage point."
+            notes="No key-protection hierarchy evidence declared or observable from external vantage point.",
+            agility_score=None,
+            agility_rating="UNKNOWN",
+            agility_rationale="No key-protection hierarchy evidence declared or observable from external vantage point.",
         )
 
     weak_links: List[str] = []
@@ -265,6 +268,8 @@ def analyze_key_protection_chain(chain: Optional[KeyProtectionChain]) -> KeyChai
         "when asymmetric key wrapping or root authentication signatures remain quantum-vulnerable."
     )
 
+    agil_score, agil_rating, agil_rat = compute_crypto_agility_score(chain)
+
     return KeyChainAnalysis(
         status=overall_status,
         weak_links=weak_links,
@@ -278,7 +283,109 @@ def analyze_key_protection_chain(chain: Optional[KeyProtectionChain]) -> KeyChai
         authentication_algorithm=auth or None,
         primary_migration_dependencies=primary_deps,
         notes=notes,
+        agility_score=agil_score,
+        agility_rating=agil_rating,
+        agility_rationale=agil_rat,
     )
+
+
+def compute_crypto_agility_score(
+    chain: Optional[KeyProtectionChain],
+    declared_agility: Optional[str] = None,
+) -> Tuple[int, str, str]:
+    """
+    Computes a deterministic cryptographic agility score (0 to 100), rating, and rationale.
+    Evaluates modularity, standardization, and separation across the 4 tiers:
+    Tier 1: Data Encryption (0-25)
+    Tier 2: Key Wrapping (0-25)
+    Tier 3: Key Storage Facility (0-25)
+    Tier 4: Authentication (0-25)
+    """
+    if not chain and not declared_agility:
+        return 0, "UNKNOWN", "No cryptographic hierarchy or agility declarations provided."
+
+    if chain and not chain.data_encryption and not chain.key_wrapping and not chain.key_storage and not chain.authentication and not chain.agility_mode and not declared_agility:
+        return 0, "UNKNOWN", "No cryptographic hierarchy or agility declarations provided."
+
+    dec_agil = (declared_agility or (chain.agility_mode if chain else None) or "").strip().upper()
+
+    t1_score = 15
+    t2_score = 15
+    t3_score = 15
+    t4_score = 15
+
+    if chain:
+        # Tier 1: Bulk Data Encryption
+        d_enc = (chain.data_encryption or "").upper()
+        if any(a in d_enc for a in ["AES-256", "AES256", "CHACHA20"]):
+            t1_score = 25
+        elif any(a in d_enc for a in ["AES-128", "AES128"]):
+            t1_score = 15
+        elif any(a in d_enc for a in ["3DES", "DES", "RC4", "BLOWFISH", "NULL"]):
+            t1_score = 0
+        elif not d_enc:
+            t1_score = 15
+
+        # Tier 2: Key Wrapping / KEK
+        k_wrap = (chain.key_wrapping or "").upper()
+        if any(p in k_wrap for p in ["ML-KEM", "MLKEM", "KYBER", "HYBRID"]):
+            t2_score = 25
+        elif any(a in k_wrap for a in ["AES-KW", "AES256-KW", "KW"]):
+            t2_score = 20
+        elif any(v in k_wrap for v in ["RSA", "ECDH", "X25519", "DIFFIE", "DH"]):
+            t2_score = 10
+        elif any(l in k_wrap for l in ["3DES", "DES"]):
+            t2_score = 0
+        elif not k_wrap:
+            t2_score = 15
+
+        # Tier 3: Key Storage Medium
+        k_stor = (chain.key_storage or "").upper()
+        if any(c in k_stor for c in ["KMS", "KEY VAULT", "CLOUD", "VAULT"]):
+            t3_score = 25
+        elif any(h in k_stor for h in ["HSM", "PAYSHIELD", "LUNA", "HARDWARE"]):
+            t3_score = 20
+        elif any(s in k_stor for s in ["LOCAL", "PLAINTEXT", "FILE", "SOFTWARE", "HARDCODED"]):
+            t3_score = 0
+        elif not k_stor:
+            t3_score = 15
+
+        # Tier 4: Authentication
+        auth = (chain.authentication or "").upper()
+        if any(p in auth for p in ["ML-DSA", "SLH-DSA", "DILITHIUM", "SPHINCS", "FALCON"]):
+            t4_score = 25
+        elif any(v in auth for v in ["ECDSA", "RSA", "ED25519", "DSA", "P256", "P384"]):
+            t4_score = 10
+        elif any(n in auth for n in ["NONE", "HARDCODED", "STATIC"]):
+            t4_score = 0
+        elif not auth:
+            t4_score = 15
+
+    raw_score = t1_score + t2_score + t3_score + t4_score
+
+    # Apply declared agility adjustments
+    if "HARDCODED" in dec_agil or "MONOLITHIC" in dec_agil:
+        final_score = min(raw_score, 35)
+    elif "CONFIGURABLE" in dec_agil:
+        final_score = max(raw_score, 85)
+    elif "MODERATE" in dec_agil:
+        final_score = min(max(raw_score, 50), 75)
+    else:
+        final_score = raw_score
+
+    final_score = max(0, min(100, final_score))
+
+    if final_score >= 80:
+        rating = "HIGH"
+        rationale = "High cryptographic agility: pluggable, parameterized algorithms and cloud KMS/API key orchestration."
+    elif final_score >= 50:
+        rating = "MODERATE"
+        rationale = "Moderate cryptographic agility: partial parameterization or hardware vendor firmware constraints."
+    else:
+        rating = "LOW"
+        rationale = "Low cryptographic agility: rigid hardcoded primitives, legacy ciphers, or unprotected local key storage."
+
+    return final_score, rating, rationale
 
 
 # ==============================================================================

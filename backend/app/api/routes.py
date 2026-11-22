@@ -7,7 +7,7 @@ import asyncio
 from typing import Dict, List, Any, Optional
 import logging
 from datetime import datetime, timezone
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Request, status, Query
 from fastapi.responses import JSONResponse
 
 from app.schemas.scan import (
@@ -23,10 +23,24 @@ from app.models.simulation import WhatIfMigrationRequest, WhatIfMigrationResult
 from app.services.assessment_service import AssessmentService
 from app.services.audit_service import AuditService
 from app.scanners.domain_validator import DomainValidationError
-from app.security.network import UnsafeTargetError, DnsResolutionError
-from app.security.rate_limiter import DEFAULT_RATE_LIMITER, SCAN_SEMAPHORE, MAX_CONCURRENT_SCANS
+from app.security.network import (
+    UnsafeTargetError,
+    DnsResolutionError,
+    validate_scan_port,
+    DisallowedPortError,
+    InvalidPortError,
+)
+from app.security.rate_limiter import (
+    DEFAULT_RATE_LIMITER,
+    UPLOAD_SCAN_RATE_LIMITER,
+    AI_RATE_LIMITER,
+    SCAN_SEMAPHORE,
+    MAX_CONCURRENT_SCANS,
+    get_client_ip,
+)
 from app.scanners.tls_scanner import TlsScanError, TlsTimeoutError, TlsConnectionError
 from app.ai.service import DEFAULT_AI_SERVICE
+from app.ai.budget import AI_BUDGET_TRACKER
 from app.ai.schemas import (
     AIStatusResponse,
     AIExplanationResult,
@@ -39,6 +53,7 @@ from app.ai.schemas import (
     ReportExplanationRequest,
     ReportExplanationResponse,
 )
+from app.services.audit_chain_service import DEFAULT_AUDIT_CHAIN_SERVICE, GENESIS_PREVIOUS_HASH
 
 logger = logging.getLogger("quantumshield.api")
 router = APIRouter()
@@ -76,7 +91,6 @@ async def run_scan(request: ScanRequest, http_request: Request):
     for the provided domain.
     """
     domain = request.domain.strip() if request.domain else ""
-    port = request.port or 443
 
     # Fast validation for empty domain before consuming concurrency or rate limiter
     if not domain:
@@ -89,13 +103,30 @@ async def run_scan(request: ScanRequest, http_request: Request):
             },
         )
 
-    # Use the direct connection address; never trust caller-supplied
-    # X-Forwarded-For unless a trusted proxy is explicitly configured.
-    client_ip = (
-        http_request.client.host
-        if http_request.client
-        else "127.0.0.1"
-    )
+    # Validate port before consuming rate limits or concurrency
+    try:
+        port = validate_scan_port(request.port if request.port is not None else 443)
+    except InvalidPortError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "INVALID_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
+    except DisallowedPortError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "DISALLOWED_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
+
+    # Extract client IP safely (respecting explicit trusted proxy configuration)
+    client_ip = get_client_ip(http_request)
 
     # Enforce in-memory sliding window rate limit (10 scans / min / IP)
     allowed, retry_after = DEFAULT_RATE_LIMITER.is_allowed(client_ip)
@@ -135,6 +166,28 @@ async def run_scan(request: ScanRequest, http_request: Request):
             None, assessment_service.assess_domain, domain, port, probe_pqc, asset_id
         )
         return result
+
+    except InvalidPortError as e:
+        logger.warning(f"Invalid port for target '{domain}': {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "INVALID_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
+
+    except DisallowedPortError as e:
+        logger.warning(f"Disallowed port for target '{domain}': {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "DISALLOWED_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
 
     except UnsafeTargetError as e:
         logger.warning(f"SSRF prevention triggered for target '{domain}': {str(e)}")
@@ -235,7 +288,6 @@ async def run_audit(request: AuditRequest, http_request: Request):
     Zero Trust Verification -> Multidimensional Risk Separation.
     """
     domain = request.domain.strip() if request.domain else ""
-    port = request.port or 443
 
     if not domain:
         return JSONResponse(
@@ -247,13 +299,30 @@ async def run_audit(request: AuditRequest, http_request: Request):
             },
         )
 
-    # Use the direct connection address; never trust caller-supplied
-    # X-Forwarded-For unless a trusted proxy is explicitly configured.
-    client_ip = (
-        http_request.client.host
-        if http_request.client
-        else "127.0.0.1"
-    )
+    # Validate port before consuming rate limits or concurrency
+    try:
+        port = validate_scan_port(request.port if request.port is not None else 443)
+    except InvalidPortError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "INVALID_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
+    except DisallowedPortError as e:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "DISALLOWED_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
+
+    # Extract client IP safely (respecting explicit trusted proxy configuration)
+    client_ip = get_client_ip(http_request)
 
     # Enforce sliding window rate limit
     allowed, retry_after = DEFAULT_RATE_LIMITER.is_allowed(client_ip)
@@ -290,6 +359,28 @@ async def run_audit(request: AuditRequest, http_request: Request):
             None, audit_service.audit_target, domain, port, request
         )
         return result
+
+    except InvalidPortError as e:
+        logger.warning(f"Invalid port during audit for '{domain}': {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "INVALID_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
+
+    except DisallowedPortError as e:
+        logger.warning(f"Disallowed port during audit for '{domain}': {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={
+                "error": "DISALLOWED_PORT",
+                "detail": str(e),
+                "target_domain": domain,
+            },
+        )
 
     except UnsafeTargetError as e:
         logger.warning(f"SSRF prevention triggered during audit for '{domain}': {str(e)}")
@@ -456,7 +547,7 @@ def simulate_post_quantum_migration(request: WhatIfMigrationRequest):
         logger.exception("Unexpected error during migration simulation")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "SIMULATION_INTERNAL_ERROR", "detail": str(e)},
+            content={"error": "SIMULATION_INTERNAL_ERROR", "detail": "An internal error occurred during migration simulation. Please try again."},
         )
 
 
@@ -489,7 +580,7 @@ def get_system_cbom(system_id: str):
 
 
 @router.get("/banking/systems/{system_id}/report/json", tags=["Reports & Auditability"])
-async def get_system_json_report(system_id: str, include_ai: bool = False):
+async def get_system_json_report(system_id: str, http_request: Request, include_ai: bool = False):
     """
     Returns a comprehensive, machine-readable post-quantum assessment report
     sealed with a cryptographic audit hash chain record.
@@ -497,6 +588,20 @@ async def get_system_json_report(system_id: str, include_ai: bool = False):
     """
     from app.services.report_service import build_complete_json_report
     from app.models.profiles import get_synthetic_profile_by_id
+
+    if include_ai:
+        client_ip = get_client_ip(http_request)
+        allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+        if not allowed:
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry_after)},
+                content={
+                    "error": "RATE_LIMIT_EXCEEDED",
+                    "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+                },
+            )
+
     if not get_synthetic_profile_by_id(system_id):
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -517,7 +622,7 @@ async def get_system_json_report(system_id: str, include_ai: bool = False):
 
 
 @router.get("/banking/systems/{system_id}/report/pdf", tags=["Reports & Auditability"])
-async def get_system_pdf_report(system_id: str, include_ai: bool = False):
+async def get_system_pdf_report(system_id: str, http_request: Request, include_ai: bool = False):
     """
     Generates and returns an executive-grade, professional PDF audit report.
     Optionally enriches with AI report explanation when include_ai=True and provider is configured.
@@ -525,6 +630,20 @@ async def get_system_pdf_report(system_id: str, include_ai: bool = False):
     from app.services.report_service import generate_pdf_report, build_complete_json_report
     from app.models.profiles import get_synthetic_profile_by_id
     from fastapi import Response
+
+    if include_ai:
+        client_ip = get_client_ip(http_request)
+        allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+        if not allowed:
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry_after)},
+                content={
+                    "error": "RATE_LIMIT_EXCEEDED",
+                    "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+                },
+            )
+
     if not get_synthetic_profile_by_id(system_id):
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -579,7 +698,6 @@ def verify_audit_chain_endpoint(records_data: List[Dict[str, Any]]):
     Detects broken chains, altered sequence history, or corrupted records.
     """
     from app.models.audit_chain import AuditRecord
-    from app.services.audit_chain_service import DEFAULT_AUDIT_CHAIN_SERVICE
     try:
         records = [AuditRecord(**r) for r in records_data]
         result = DEFAULT_AUDIT_CHAIN_SERVICE.verify_audit_chain(records)
@@ -591,12 +709,158 @@ def verify_audit_chain_endpoint(records_data: List[Dict[str, Any]]):
         )
 
 
+@router.get("/audit/ledger", tags=["Reports & Auditability"])
+def get_audit_ledger_endpoint(
+    limit: int = Query(default=50, ge=1, le=500, description="Page limit (1 to 500)"),
+    offset: int = Query(default=0, ge=0, description="Record offset"),
+    system_id: Optional[str] = Query(default=None, description="Optional system ID filter"),
+):
+    """
+    Returns paginated audit record metadata in stable order.
+    Read-only GET operation that never mutates ledger state or leaks secrets.
+    """
+    try:
+        svc = DEFAULT_AUDIT_CHAIN_SERVICE
+        storage = svc._storage
+        if storage is not None:
+            total = storage.get_record_count(assessment_id=system_id)
+            records = storage.get_records(limit=limit, offset=offset, assessment_id=system_id)
+        else:
+            in_mem = [r for r in svc._in_memory_fallback if (system_id is None or r.assessment_id == system_id)]
+            total = len(in_mem)
+            records = in_mem[offset:offset + limit]
+
+        # Return metadata safely, ensuring no internal paths or sensitive attributes leak
+        serialized_records = [
+            {
+                "record_id": r.record_id,
+                "assessment_id": r.assessment_id,
+                "assessment_hash": r.assessment_hash,
+                "previous_hash": r.previous_hash,
+                "current_hash": r.current_hash,
+                "timestamp": r.timestamp,
+                "signature": r.signature,
+                "schema_version": r.schema_version,
+            }
+            for r in records
+        ]
+
+        return {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "records": serialized_records,
+        }
+    except Exception as e:
+        logger.error(f"Error querying audit ledger: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "AUDIT_LEDGER_ERROR",
+                "detail": "An internal error occurred while querying the audit ledger.",
+            },
+        )
+
+
+@router.get("/audit/head", tags=["Reports & Auditability"])
+def get_audit_head_endpoint():
+    """
+    Returns the current audit ledger head metadata and cryptographic verification status.
+    Read-only GET operation.
+    """
+    try:
+        svc = DEFAULT_AUDIT_CHAIN_SERVICE
+        storage = svc._storage
+
+        if storage is not None:
+            total = storage.get_record_count()
+            if total == 0:
+                return {
+                    "record_id": None,
+                    "current_hash": GENESIS_PREVIOUS_HASH,
+                    "timestamp": None,
+                    "record_count": 0,
+                    "chain_valid": True,
+                    "status": "EMPTY",
+                    "checkpoint": None,
+                    "external_anchor": "UNCONFIGURED",
+                    "external_checkpoint": None,
+                }
+            latest_records = storage.get_records(limit=1, offset=total - 1)
+            latest = latest_records[0] if latest_records else None
+            checkpoint = storage.get_latest_checkpoint() if hasattr(storage, "get_latest_checkpoint") else None
+        else:
+            total = len(svc._in_memory_fallback)
+            if total == 0:
+                return {
+                    "record_id": None,
+                    "current_hash": GENESIS_PREVIOUS_HASH,
+                    "timestamp": None,
+                    "record_count": 0,
+                    "chain_valid": True,
+                    "status": "EMPTY",
+                    "checkpoint": None,
+                    "external_anchor": "UNCONFIGURED",
+                    "external_checkpoint": None,
+                }
+            latest = svc._in_memory_fallback[-1]
+            checkpoint = None
+
+        if latest is None:
+            return {
+                "record_id": None,
+                "current_hash": GENESIS_PREVIOUS_HASH,
+                "timestamp": None,
+                "record_count": 0,
+                "chain_valid": True,
+                "status": "EMPTY",
+                "checkpoint": None,
+                "external_anchor": "UNCONFIGURED",
+                "external_checkpoint": None,
+            }
+
+        verify_res = svc.verify_ledger()
+
+        return {
+            "record_id": latest.record_id,
+            "current_hash": latest.current_hash,
+            "timestamp": latest.timestamp,
+            "record_count": total,
+            "chain_valid": verify_res.valid,
+            "status": verify_res.status,
+            "checkpoint": checkpoint,
+            "external_anchor": verify_res.details.get("external_anchor", "UNCONFIGURED"),
+            "external_checkpoint": verify_res.details.get("external_checkpoint"),
+        }
+    except Exception as e:
+        logger.error(f"Error querying audit head: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "AUDIT_HEAD_ERROR",
+                "detail": "An internal error occurred while retrieving the audit ledger head.",
+            },
+        )
+
+
+
 @router.post("/scan/config", tags=["Configuration Scanning"])
-def scan_uploaded_config(payload: ConfigScanRequest):
+def scan_uploaded_config(payload: ConfigScanRequest, http_request: Request):
     """
     Safely scans uploaded configuration files without executing them.
     Files are stored temporarily and removed after scanning.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = UPLOAD_SCAN_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (upload scan). Please try again in {retry_after} seconds.",
+            },
+        )
     from app.scanners.config_scanner import BankingConfigScanner
     from app.services.finding_normalizer import normalize_config_finding
     from app.scanners.crypto_misuse.evidence import is_binary_content
@@ -758,11 +1022,22 @@ def scan_uploaded_config(payload: ConfigScanRequest):
 
 
 @router.post("/scan/code", tags=["Code Scanning"])
-def scan_uploaded_code(payload: CodeScanRequest):
+def scan_uploaded_code(payload: CodeScanRequest, http_request: Request):
     """
     Safely scans uploaded source files for cryptographic misuse.
     Source code is analyzed in memory and is never executed.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = UPLOAD_SCAN_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (upload scan). Please try again in {retry_after} seconds.",
+            },
+        )
     from app.scanners.crypto_misuse.scanner import (
         CryptoMisuseScanner,
         EXTENSION_TO_LANGUAGE,
@@ -904,10 +1179,21 @@ def scan_uploaded_code(payload: CodeScanRequest):
 
 
 @router.post("/scan/cert", tags=["Certificate Scanning"])
-def scan_uploaded_certificate(payload: CertificateScanRequest):
+def scan_uploaded_certificate(payload: CertificateScanRequest, http_request: Request):
     """
     Safely parses an uploaded PEM certificate without contacting external systems.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = UPLOAD_SCAN_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (upload scan). Please try again in {retry_after} seconds.",
+            },
+        )
     from app.scanners.certificate_parser import parse_pem_certificate
     from app.scanners.crypto_misuse.evidence import is_binary_content
 
@@ -1022,9 +1308,37 @@ def scan_uploaded_certificate(payload: CertificateScanRequest):
 # ============================================================================
 
 @router.get("/ai/status", response_model=AIStatusResponse, tags=["AI Readiness Intelligence"])
-def get_ai_status():
+def get_ai_status(http_request: Request):
     """Returns the current operational status of the AI intelligence layer."""
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+            },
+        )
     return DEFAULT_AI_SERVICE.get_status()
+
+
+@router.get("/ai/budget", tags=["AI Readiness Intelligence"])
+def get_ai_budget(http_request: Request):
+    """Returns the current daily AI usage budget and consumption metrics."""
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+            },
+        )
+    return AI_BUDGET_TRACKER.get_status()
 
 
 @router.post(
@@ -1032,11 +1346,22 @@ def get_ai_status():
     response_model=AIExplanationResult[FindingExplanationResponse],
     tags=["AI Readiness Intelligence"],
 )
-async def explain_finding_endpoint(payload: FindingExplanationRequest):
+async def explain_finding_endpoint(payload: FindingExplanationRequest, http_request: Request):
     """
     Generates an AI-powered contextual explanation for an individual scanner finding.
     Grounded strictly in verified evidence; preserves NOT_OBSERVABLE != VULNERABLE.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+            },
+        )
     return await DEFAULT_AI_SERVICE.explain_finding(payload)
 
 
@@ -1045,11 +1370,22 @@ async def explain_finding_endpoint(payload: FindingExplanationRequest):
     response_model=AIExplanationResult[BankingRiskExplanationResponse],
     tags=["AI Readiness Intelligence"],
 )
-async def explain_banking_risk_endpoint(payload: BankingRiskExplanationRequest):
+async def explain_banking_risk_endpoint(payload: BankingRiskExplanationRequest, http_request: Request):
     """
     Explains the deterministic factors behind a banking system's risk score and upgrade queue placement.
     Never recalculates or modifies the deterministic score or priority ranking.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+            },
+        )
     return await DEFAULT_AI_SERVICE.explain_banking_risk(payload)
 
 
@@ -1058,11 +1394,22 @@ async def explain_banking_risk_endpoint(payload: BankingRiskExplanationRequest):
     response_model=AIExplanationResult[MigrationAdvisoryResponse],
     tags=["AI Readiness Intelligence"],
 )
-async def advise_migration_endpoint(payload: MigrationAdvisoryRequest):
+async def advise_migration_endpoint(payload: MigrationAdvisoryRequest, http_request: Request):
     """
     AI migration advisor providing architectural guidance, operational considerations,
     and phased migration milestones based on deterministic upgrade plan data.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+            },
+        )
     return await DEFAULT_AI_SERVICE.advise_migration(payload)
 
 
@@ -1071,11 +1418,22 @@ async def advise_migration_endpoint(payload: MigrationAdvisoryRequest):
     response_model=AIExplanationResult[ReportExplanationResponse],
     tags=["AI Readiness Intelligence"],
 )
-async def explain_report_endpoint(payload: ReportExplanationRequest):
+async def explain_report_endpoint(payload: ReportExplanationRequest, http_request: Request):
     """
     Generates executive and technical narrative summaries for a banking assessment report.
     Content is strictly marked as advisory and informational.
     """
+    client_ip = get_client_ip(http_request)
+    allowed, retry_after = AI_RATE_LIMITER.is_allowed(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            content={
+                "error": "RATE_LIMIT_EXCEEDED",
+                "detail": f"Rate limit exceeded (AI intelligence). Please try again in {retry_after} seconds.",
+            },
+        )
     from app.models.profiles import get_synthetic_profile_by_id
     from app.services.report_service import build_complete_json_report
 

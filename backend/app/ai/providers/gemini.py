@@ -14,6 +14,7 @@ from app.ai.providers.base import (
     AIProviderRateLimitError,
     AIProviderUnavailableError,
 )
+from app.ai.providers.resilience import execute_http_with_resilience
 
 logger = logging.getLogger("quantumshield.ai.gemini")
 
@@ -69,9 +70,9 @@ class GeminiAIProvider(BaseAIProvider):
             },
         }
 
-        try:
+        async def _call() -> httpx.Response:
             async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
-                response = await client.post(
+                return await client.post(
                     url,
                     json=payload,
                     headers={
@@ -80,35 +81,21 @@ class GeminiAIProvider(BaseAIProvider):
                     },
                 )
 
-            if response.status_code == 429:
-                raise AIProviderRateLimitError("Gemini API quota or rate limit exceeded.")
+        response = await execute_http_with_resilience(
+            _call,
+            provider_name=self.provider_name,
+        )
 
-            if response.status_code != 200:
-                logger.error(
-                    "Gemini API returned HTTP status %s.",
-                    response.status_code,
-                )
-                raise AIProviderError(f"Gemini API request failed with HTTP {response.status_code}")
+        data = response.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            raise AIProviderError("Gemini API returned empty candidates.")
 
-            data = response.json()
-            candidates = data.get("candidates") or []
-            if not candidates:
-                raise AIProviderError("Gemini API returned empty candidates.")
+        first_candidate = candidates[0]
+        content = first_candidate.get("content", {})
+        parts = content.get("parts", [])
+        if not parts:
+            raise AIProviderError("Gemini API candidate contained no parts.")
 
-            first_candidate = candidates[0]
-            content = first_candidate.get("content", {})
-            parts = content.get("parts", [])
-            if not parts:
-                raise AIProviderError("Gemini API candidate contained no parts.")
-
-            text = parts[0].get("text", "").strip()
-            return text
-
-        except httpx.TimeoutException as exc:
-            raise AIProviderTimeoutError(f"Gemini API call timed out after {self._timeout_seconds}s") from exc
-        except (AIProviderError, AIProviderUnavailableError, AIProviderRateLimitError, AIProviderTimeoutError):
-            raise
-        except Exception as exc:
-            raise AIProviderError(
-                "Unexpected error communicating with Gemini API."
-            ) from exc
+        text = parts[0].get("text", "").strip()
+        return text

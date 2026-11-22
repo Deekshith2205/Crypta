@@ -8,7 +8,10 @@ from app.schemas.scan import ScanResponse
 from app.schemas.audit import AuditRequest, AuditResponse
 from app.models.banking import BankingAsset, infer_default_banking_asset
 from app.models.profiles import get_synthetic_profile_by_id
-from app.models.zero_trust import build_default_zero_trust_assessment
+from app.models.zero_trust import (
+    build_default_zero_trust_assessment,
+    build_zero_trust_assessment,
+)
 from app.models.risk import RiskDimensions
 from app.services.crypto_audit_adapter import (
     map_findings_to_audit_layer,
@@ -91,9 +94,10 @@ class AuditService:
         audit_findings = map_findings_to_audit_layer(scan_response.findings, asset.id)
 
         # 4. Zero Trust Evaluation
-        zero_trust = build_default_zero_trust_assessment(
+        zero_trust = build_zero_trust_assessment(
             asset.id,
-            tls_version=scan_response.tls.negotiated_protocol
+            tls_version=scan_response.tls.negotiated_protocol,
+            asset=asset,
         )
 
         # 5. Multidimensional Risk Separation

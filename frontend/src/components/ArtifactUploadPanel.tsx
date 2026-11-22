@@ -326,7 +326,7 @@ export const ArtifactUploadPanel: React.FC = () => {
     }
   };
 
-  const activeMode = uploadModes.find((item) => item.id === mode)!;
+  const activeMode = uploadModes.find((item) => item.id === mode) ?? uploadModes[0];
   const ActiveIcon = activeMode.icon;
 
   return (
@@ -410,7 +410,7 @@ export const ArtifactUploadPanel: React.FC = () => {
 
         <label
           htmlFor="artifact-upload-input"
-          className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/70 hover:bg-indigo-50/40 hover:border-indigo-300 p-8 text-center cursor-pointer transition"
+          className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/70 hover:bg-indigo-50/40 hover:border-indigo-300 focus-within:ring-2 focus-within:ring-[#5755D9] focus-within:border-[#5755D9] p-8 text-center cursor-pointer transition"
         >
           <Upload className="w-8 h-8 text-[#5755D9] mb-3" />
           <span className="text-sm font-semibold text-slate-800">

@@ -5,11 +5,13 @@ import type {
   EvidenceGap,
   BankingRiskAssessment,
   AuditVerificationResult,
+  CBOMDocument,
 } from '../types/scan';
 
 import {
   getBankingSystemJsonReport,
   getBankingSystemPdfReport,
+  getBankingSystemCBOM,
   verifyAuditRecord,
 } from '../services/api';
 
@@ -29,9 +31,11 @@ import {
   FileText,
   ShieldCheck,
   Sparkles,
+  Layers,
 } from 'lucide-react';
 
 import { AIBankingRiskModal } from './ai/AIBankingRiskModal';
+import { CBOMModal } from './CBOMModal';
 
 interface BankingSystemCardProps {
   profile: BankingAsset;
@@ -55,7 +59,7 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
   const [expanded, setExpanded] = useState<boolean>(isDetailedView);
 
   const [reportBusy, setReportBusy] = useState<
-    'json' | 'pdf' | 'audit' | null
+    'json' | 'pdf' | 'audit' | 'cbom' | null
   >(null);
 
   const [auditResult, setAuditResult] =
@@ -65,6 +69,8 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
     useState<string | null>(null);
 
   const [aiModalOpen, setAiModalOpen] = useState<boolean>(false);
+  const [cbomModalOpen, setCbomModalOpen] = useState<boolean>(false);
+  const [cbomData, setCbomData] = useState<CBOMDocument | null>(null);
 
   // ==========================================================================
   // BADGE HELPERS
@@ -241,6 +247,29 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
   };
 
   // ==========================================================================
+  // TASK F8: CYCLONEDX 1.7 CBOM RETRIEVAL & MODAL
+  // ==========================================================================
+
+  const handleOpenCBOM = async () => {
+    setReportBusy('cbom');
+    setReportActionError(null);
+
+    try {
+      const cbom = await getBankingSystemCBOM(profile.id);
+      setCbomData(cbom);
+      setCbomModalOpen(true);
+    } catch (error) {
+      setReportActionError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to retrieve CBOM document.'
+      );
+    } finally {
+      setReportBusy(null);
+    }
+  };
+
+  // ==========================================================================
   // COMPONENT RENDER
   // ==========================================================================
 
@@ -346,6 +375,19 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
               </button>
             )}
 
+            {/* Task F8: CycloneDX 1.7 CBOM Modal */}
+            <button
+              onClick={handleOpenCBOM}
+              disabled={reportBusy !== null}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 hover:border-[#5755D9] hover:text-[#5755D9] text-xs font-semibold transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              title="View and download CycloneDX 1.7 Cryptographic Bill of Materials"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>
+                {reportBusy === 'cbom' ? 'Loading...' : 'CBOM'}
+              </span>
+            </button>
+
             {/* Task 5: JSON Report Download */}
             <button
               onClick={handleDownloadJson}
@@ -407,33 +449,71 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
 
         </div>
 
-        {/* Task 5: Audit Verification Status */}
+        {/* Task C8: Audit Verification Status & Cryptographic Proof */}
         {(auditResult || reportActionError) && (
           <div className="mt-3 space-y-2">
-
             {auditResult && (
               <div
-                className={`flex items-center gap-2 text-xs font-semibold ${
+                className={`p-2.5 rounded border text-xs ${
                   auditResult.valid
-                    ? 'text-emerald-700'
-                    : 'text-red-700'
+                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                    : auditResult.status === 'RECORD_NOT_IN_LEDGER' || auditResult.status === 'EXTERNAL_ANCHOR_UNAVAILABLE' || auditResult.status === 'EXTERNAL_ANCHOR_INVALID'
+                    ? 'bg-amber-50/70 border-amber-200 text-amber-900'
+                    : 'bg-red-50/70 border-red-200 text-red-900'
                 }`}
                 role="status"
               >
-                {auditResult.valid ? (
-                  <ShieldCheck className="w-4 h-4" />
-                ) : (
-                  <ShieldAlert className="w-4 h-4" />
-                )}
+                <div className="flex items-center gap-2 font-semibold">
+                  {auditResult.valid ? (
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  ) : (
+                    <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  )}
+                  <span>
+                    {auditResult.status === 'EXTERNALLY_ANCHORED'
+                      ? 'Cryptographically signed, externally anchored audit record verified'
+                      : auditResult.valid
+                      ? 'Cryptographically signed audit record verified (Local Ledger)'
+                      : auditResult.status === 'LEDGER_SUFFIX_TRUNCATION_DETECTED'
+                      ? 'CRITICAL ALERT: Ledger suffix truncation detected by external anchor!'
+                      : auditResult.status === 'LEDGER_ROLLBACK_DETECTED'
+                      ? 'CRITICAL ALERT: Ledger rollback / chain divergence detected!'
+                      : `Audit verification alert: ${auditResult.error || 'Integrity check unsuccessful'}`}
+                  </span>
+                </div>
 
-                <span>
-                  {auditResult.valid
-                    ? 'Audit record verified'
-                    : `Audit verification failed: ${
-                        auditResult.error ||
-                        'Integrity check unsuccessful'
-                      }`}
-                </span>
+                <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] font-mono opacity-90">
+                  {auditResult.record_id && (
+                    <div>
+                      <span className="font-sans font-medium text-slate-500">Record ID: </span>
+                      <span>{auditResult.record_id.slice(0, 18)}...</span>
+                    </div>
+                  )}
+                  {Boolean(auditResult.details?.assessment_hash) && (
+                    <div>
+                      <span className="font-sans font-medium text-slate-500">Content Hash: </span>
+                      <span>{String(auditResult.details.assessment_hash).slice(0, 16)}...</span>
+                    </div>
+                  )}
+                  <div>
+                    <span className="font-sans font-medium text-slate-500">Signature: </span>
+                    <span className={auditResult.status === 'INVALID_SIGNATURE' ? 'text-red-600 font-bold' : 'text-emerald-700'}>
+                      {auditResult.status === 'INVALID_SIGNATURE' ? 'FAILED' : 'HMAC-SHA256 Valid'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-sans font-medium text-slate-500">Ledger Membership: </span>
+                    <span className={auditResult.status === 'RECORD_NOT_IN_LEDGER' ? 'text-amber-700 font-bold' : auditResult.valid ? 'text-emerald-700' : 'text-slate-600'}>
+                      {auditResult.status === 'RECORD_NOT_IN_LEDGER' ? 'NOT IN LEDGER' : auditResult.valid ? 'Verified in Ledger' : 'Unconfirmed'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-sans font-medium text-slate-500">External Anchor: </span>
+                    <span className={auditResult.status === 'EXTERNALLY_ANCHORED' ? 'text-emerald-700 font-semibold' : auditResult.status === 'LEDGER_SUFFIX_TRUNCATION_DETECTED' || auditResult.status === 'LEDGER_ROLLBACK_DETECTED' ? 'text-red-600 font-bold' : 'text-slate-600'}>
+                      {auditResult.status === 'EXTERNALLY_ANCHORED' ? 'Verified External Anchor' : auditResult.status === 'LEDGER_SUFFIX_TRUNCATION_DETECTED' ? 'TRUNCATION DETECTED' : auditResult.status === 'LEDGER_ROLLBACK_DETECTED' ? 'ROLLBACK DETECTED' : 'Local Verification Only'}
+                    </span>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -442,7 +522,6 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
                 {reportActionError}
               </p>
             )}
-
           </div>
         )}
 
@@ -691,6 +770,11 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
                     <span className="text-xs font-bold text-slate-900 tracking-wide flex items-center space-x-2">
                       <Lock className="w-4 h-4 text-[#5755D9]" />
                       <span>Key Protection Chain Hierarchy</span>
+                      {risk?.key_protection?.agility_rating && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">
+                          Agility: {risk.key_protection.agility_rating} ({risk.key_protection.agility_score ?? 'N/A'}/100)
+                        </span>
+                      )}
                     </span>
 
                     <span className="text-[10px] font-mono text-[#5755D9]">
@@ -1044,6 +1128,15 @@ export const BankingSystemCard: React.FC<BankingSystemCardProps> = ({
         onClose={() => setAiModalOpen(false)}
         profile={profile}
         risk={risk}
+      />
+
+      {/* Task F8: CycloneDX 1.7 CBOM Modal */}
+      <CBOMModal
+        isOpen={cbomModalOpen}
+        onClose={() => setCbomModalOpen(false)}
+        cbom={cbomData}
+        systemName={profile.name}
+        systemId={profile.id}
       />
     </div>
   );

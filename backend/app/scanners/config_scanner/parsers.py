@@ -75,11 +75,29 @@ class ParsedConfigFile:
     errors: List[str] = field(default_factory=list)
 
 
-# Line-tracking YAML SafeLoader
+# Line-tracking YAML SafeLoader with alias and node bounds
 if HAVE_YAML:
     class LineTrackingSafeLoader(SafeLoader):
-        """Custom SafeLoader that stores line numbers for dicts and values."""
-        pass
+        """Custom SafeLoader that stores line numbers for dicts and values,
+        and enforces limits on aliases and nodes to prevent denial-of-service."""
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.alias_count = 0
+            self.node_count = 0
+
+        def compose_node(self, parent, index):
+            self.node_count += 1
+            if self.node_count > SafeConfigParser.MAX_TOTAL_NODES:
+                raise ParserSecurityError(
+                    f"Maximum YAML node count ({SafeConfigParser.MAX_TOTAL_NODES}) exceeded"
+                )
+            if self.check_event(yaml.events.AliasEvent):
+                self.alias_count += 1
+                if self.alias_count > SafeConfigParser.MAX_YAML_ALIASES:
+                    raise ParserSecurityError(
+                        f"YAML alias count ({self.alias_count}) exceeded safe limit ({SafeConfigParser.MAX_YAML_ALIASES}); possible alias expansion attack"
+                    )
+            return super().compose_node(parent, index)
 
     def _construct_mapping_with_lines(loader: SafeLoader, node: Any) -> Dict[str, Any]:
         loader.flatten_mapping(node)
@@ -103,8 +121,14 @@ if HAVE_YAML:
 class SafeConfigParser:
     """
     Safe parser for banking configurations across multiple formats.
-    Enforces path boundaries and avoids executing code.
+    Enforces path boundaries, depth limits, and avoids executing code.
     """
+
+    MAX_NESTING_DEPTH: int = 20
+    MAX_TOTAL_NODES: int = 5000
+    MAX_YAML_ALIASES: int = 5
+    MAX_STRING_LENGTH: int = 65536
+    MAX_COLLECTION_SIZE: int = 2000
 
     SUPPORTED_EXTENSIONS = {
         ".yaml": "YAML",
@@ -203,6 +227,10 @@ class SafeConfigParser:
                 raw_data, entries = self._parse_env(text)
             elif fmt == "XML":
                 raw_data, entries = self._parse_xml(text)
+        except ParserSecurityError as e:
+            errors.append(f"Security validation failed: {e}")
+        except ParserError as e:
+            errors.append(f"Parsing error: {e}")
         except Exception as e:
             errors.append(f"Parsing {fmt} failed: {e}")
 
@@ -214,6 +242,55 @@ class SafeConfigParser:
             errors=errors
         )
 
+    # ----------------- SECURITY VALIDATORS -----------------
+
+    def _validate_structure(self, node: Any, depth: int = 1) -> None:
+        """Validate maximum nesting depth, string lengths, and collection sizes."""
+        if depth > self.MAX_NESTING_DEPTH:
+            raise ParserSecurityError(f"Maximum nesting depth ({self.MAX_NESTING_DEPTH}) exceeded")
+
+        if isinstance(node, dict):
+            if len(node) > self.MAX_COLLECTION_SIZE:
+                raise ParserSecurityError(f"Collection size ({len(node)}) exceeds limit ({self.MAX_COLLECTION_SIZE})")
+            for k, v in node.items():
+                if k in ("__line_map__", "__line__"):
+                    continue
+                if isinstance(k, str) and len(k) > self.MAX_STRING_LENGTH:
+                    raise ParserSecurityError(f"Key length ({len(k)}) exceeds maximum allowed")
+                self._validate_structure(v, depth + 1)
+        elif isinstance(node, list):
+            if len(node) > self.MAX_COLLECTION_SIZE:
+                raise ParserSecurityError(f"Collection size ({len(node)}) exceeds limit ({self.MAX_COLLECTION_SIZE})")
+            for item in node:
+                self._validate_structure(item, depth + 1)
+        elif isinstance(node, str):
+            if len(node) > self.MAX_STRING_LENGTH:
+                raise ParserSecurityError(f"String value length ({len(node)}) exceeds maximum allowed")
+
+    def _check_json_depth(self, text: str) -> None:
+        """Fast linear-time scan of JSON nesting depth to prevent parser recursion exhaustion."""
+        current_depth = 0
+        in_string = False
+        escape = False
+        for char in text:
+            if escape:
+                escape = False
+                continue
+            if char == '\\':
+                escape = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char in ('{', '['):
+                current_depth += 1
+                if current_depth > self.MAX_NESTING_DEPTH:
+                    raise ParserSecurityError(f"Maximum JSON nesting depth ({self.MAX_NESTING_DEPTH}) exceeded")
+            elif char in ('}', ']'):
+                current_depth = max(0, current_depth - 1)
+
     # ----------------- PARSERS -----------------
 
     def _parse_yaml(self, text: str) -> Tuple[Any, List[ParsedEntry]]:
@@ -221,13 +298,15 @@ class SafeConfigParser:
             return None, []
         try:
             data = yaml.load(text, Loader=LineTrackingSafeLoader)
-        except Exception:
-            # Fallback to standard safe_load if custom loader fails
-            data = yaml.safe_load(text)
-            return data, self._flatten_data(data, line_map={})
+        except ParserSecurityError:
+            raise
+        except Exception as e:
+            raise ParserError(f"YAML parsing failed: {e}")
+
+        self._validate_structure(data, depth=1)
 
         entries: List[ParsedEntry] = []
-        self._extract_entries_from_dict(data, prefix="", entries=entries)
+        self._extract_entries_from_dict(data, prefix="", entries=entries, depth=1)
         return data, entries
 
     def _extract_entries_from_dict(
@@ -235,8 +314,14 @@ class SafeConfigParser:
         node: Any,
         prefix: str,
         entries: List[ParsedEntry],
-        parent_line_map: Optional[Dict[str, int]] = None
+        parent_line_map: Optional[Dict[str, int]] = None,
+        depth: int = 1
     ) -> None:
+        if depth > self.MAX_NESTING_DEPTH:
+            raise ParserSecurityError(f"Maximum nesting depth ({self.MAX_NESTING_DEPTH}) exceeded")
+        if len(entries) > self.MAX_TOTAL_NODES:
+            raise ParserSecurityError(f"Maximum node count ({self.MAX_TOTAL_NODES}) exceeded")
+
         if isinstance(node, dict):
             current_line_map = node.get("__line_map__", {})
             for key, val in node.items():
@@ -247,8 +332,7 @@ class SafeConfigParser:
                 if line is None and parent_line_map:
                     line = parent_line_map.get(key)
                 if isinstance(val, (dict, list)):
-                    self._extract_entries_from_dict(val, path, entries, current_line_map)
-                    # Also record list or dict as a container entry
+                    self._extract_entries_from_dict(val, path, entries, current_line_map, depth + 1)
                     if isinstance(val, list):
                         entries.append(self._create_entry(path, val, line, is_list=True))
                 else:
@@ -257,16 +341,26 @@ class SafeConfigParser:
             for idx, item in enumerate(node):
                 path = f"{prefix}[{idx}]"
                 if isinstance(item, (dict, list)):
-                    self._extract_entries_from_dict(item, path, entries)
+                    self._extract_entries_from_dict(item, path, entries, None, depth + 1)
                 else:
                     entries.append(self._create_entry(path, item, None))
 
     def _parse_json(self, text: str) -> Tuple[Any, List[ParsedEntry]]:
-        data = json.loads(text)
-        # Build line index for keys by searching text lines
+        self._check_json_depth(text)
+        try:
+            data = json.loads(text)
+        except RecursionError:
+            raise ParserSecurityError(f"Maximum JSON nesting depth ({self.MAX_NESTING_DEPTH}) exceeded")
+        except Exception as e:
+            raise ParserError(f"JSON parsing failed: {e}")
+
+        self._validate_structure(data, depth=1)
+
         lines = text.splitlines()
         line_cache: Dict[str, int] = {}
         for line_no, line_str in enumerate(lines, start=1):
+            if len(line_str) > self.MAX_STRING_LENGTH:
+                raise ParserSecurityError("JSON line length exceeds maximum allowed")
             match = re.search(r'"([^"\\]+)":', line_str)
             if match:
                 key = match.group(1)
@@ -274,7 +368,7 @@ class SafeConfigParser:
                     line_cache[key] = line_no
 
         entries: List[ParsedEntry] = []
-        self._flatten_json(data, prefix="", entries=entries, line_cache=line_cache)
+        self._flatten_json(data, prefix="", entries=entries, line_cache=line_cache, depth=1)
         return data, entries
 
     def _flatten_json(
@@ -282,35 +376,45 @@ class SafeConfigParser:
         node: Any,
         prefix: str,
         entries: List[ParsedEntry],
-        line_cache: Dict[str, int]
+        line_cache: Dict[str, int],
+        depth: int = 1
     ) -> None:
+        if depth > self.MAX_NESTING_DEPTH:
+            raise ParserSecurityError(f"Maximum JSON nesting depth ({self.MAX_NESTING_DEPTH}) exceeded")
+        if len(entries) > self.MAX_TOTAL_NODES:
+            raise ParserSecurityError(f"Maximum node count ({self.MAX_TOTAL_NODES}) exceeded")
+
         if isinstance(node, dict):
             for key, val in node.items():
                 path = f"{prefix}.{key}" if prefix else str(key)
                 line = line_cache.get(key)
                 if isinstance(val, dict):
-                    self._flatten_json(val, path, entries, line_cache)
+                    self._flatten_json(val, path, entries, line_cache, depth + 1)
                 elif isinstance(val, list):
                     entries.append(self._create_entry(path, val, line, is_list=True))
-                    self._flatten_json(val, path, entries, line_cache)
+                    self._flatten_json(val, path, entries, line_cache, depth + 1)
                 else:
                     entries.append(self._create_entry(path, val, line))
         elif isinstance(node, list):
             for idx, item in enumerate(node):
                 path = f"{prefix}[{idx}]"
                 if isinstance(item, (dict, list)):
-                    self._flatten_json(item, path, entries, line_cache)
+                    self._flatten_json(item, path, entries, line_cache, depth + 1)
                 else:
                     entries.append(self._create_entry(path, item, None))
 
     def _parse_toml(self, text: str) -> Tuple[Any, List[ParsedEntry]]:
         if not HAVE_TOML:
             raise ParserError("tomllib is required for TOML parsing")
-        data = tomllib.loads(text)
+        try:
+            data = tomllib.loads(text)
+        except Exception as e:
+            raise ParserError(f"TOML parsing failed: {e}")
+
+        self._validate_structure(data, depth=1)
         lines = text.splitlines()
         entries: List[ParsedEntry] = []
 
-        # Find line number for key paths
         def find_line(key: str) -> Optional[int]:
             pattern = re.compile(rf'^\s*{re.escape(key)}\s*=')
             for idx, l in enumerate(lines, start=1):
@@ -318,27 +422,32 @@ class SafeConfigParser:
                     return idx
             return None
 
-        def recurse(node: Any, prefix: str):
+        def recurse(node: Any, prefix: str, depth: int):
+            if depth > self.MAX_NESTING_DEPTH:
+                raise ParserSecurityError(f"Maximum TOML nesting depth ({self.MAX_NESTING_DEPTH}) exceeded")
+            if len(entries) > self.MAX_TOTAL_NODES:
+                raise ParserSecurityError(f"Maximum node count ({self.MAX_TOTAL_NODES}) exceeded")
+
             if isinstance(node, dict):
                 for k, v in node.items():
                     path = f"{prefix}.{k}" if prefix else str(k)
                     line = find_line(k)
                     if isinstance(v, dict):
-                        recurse(v, path)
+                        recurse(v, path, depth + 1)
                     elif isinstance(v, list):
                         entries.append(self._create_entry(path, v, line, is_list=True))
-                        recurse(v, path)
+                        recurse(v, path, depth + 1)
                     else:
                         entries.append(self._create_entry(path, v, line))
             elif isinstance(node, list):
                 for idx, item in enumerate(node):
                     path = f"{prefix}[{idx}]"
                     if isinstance(item, (dict, list)):
-                        recurse(item, path)
+                        recurse(item, path, depth + 1)
                     else:
                         entries.append(self._create_entry(path, item, None))
 
-        recurse(data, "")
+        recurse(data, "", 1)
         return data, entries
 
     def _parse_ini(self, text: str) -> Tuple[Any, List[ParsedEntry]]:
@@ -348,23 +457,37 @@ class SafeConfigParser:
         raw[current_section] = {}
 
         for line_no, line in enumerate(text.splitlines(), start=1):
+            if len(line) > self.MAX_STRING_LENGTH:
+                raise ParserSecurityError("INI line length exceeds maximum allowed")
             line_str = line.strip()
             if not line_str or line_str.startswith("#") or line_str.startswith(";"):
                 continue
             sec_match = re.match(r"^\[([a-zA-Z0-9_\-\.\:]+)\]$", line_str)
             if sec_match:
                 current_section = sec_match.group(1)
+                if len(raw) > self.MAX_COLLECTION_SIZE:
+                    raise ParserSecurityError("INI section count exceeds maximum allowed")
                 raw[current_section] = {}
                 continue
+            if len(entries) > self.MAX_TOTAL_NODES:
+                raise ParserSecurityError(f"Maximum node count ({self.MAX_TOTAL_NODES}) exceeded")
             if "=" in line_str or ":" in line_str:
                 sep = "=" if "=" in line_str else ":"
                 k, v = line_str.split(sep, 1)
                 key = k.strip()
-                val = v.strip()
+                val = v.strip().rstrip(";")
                 raw[current_section][key] = val
                 path = f"{current_section}.{key}" if current_section != "DEFAULT" else key
-                # Detect list if comma or space separated ciphers/protocols
                 entries.append(self._create_entry(path, val, line_no))
+            else:
+                parts = line_str.split(None, 1)
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    val = parts[1].strip().rstrip(";")
+                    if re.match(r"^[a-zA-Z0-9_\-\.]+$", key) and not key.startswith(("{", "}", "[", "]")):
+                        raw[current_section][key] = val
+                        path = f"{current_section}.{key}" if current_section != "DEFAULT" else key
+                        entries.append(self._create_entry(path, val, line_no))
 
         return raw, entries
 
@@ -372,9 +495,13 @@ class SafeConfigParser:
         entries: List[ParsedEntry] = []
         raw: Dict[str, str] = {}
         for line_no, line in enumerate(text.splitlines(), start=1):
+            if len(line) > self.MAX_STRING_LENGTH:
+                raise ParserSecurityError("Properties line length exceeds maximum allowed")
             line_str = line.strip()
             if not line_str or line_str.startswith("#") or line_str.startswith("!"):
                 continue
+            if len(entries) > self.MAX_TOTAL_NODES:
+                raise ParserSecurityError(f"Maximum node count ({self.MAX_TOTAL_NODES}) exceeded")
             if "=" in line_str or ":" in line_str:
                 sep = "=" if "=" in line_str else ":"
                 k, v = line_str.split(sep, 1)
@@ -388,9 +515,13 @@ class SafeConfigParser:
         entries: List[ParsedEntry] = []
         raw: Dict[str, str] = {}
         for line_no, line in enumerate(text.splitlines(), start=1):
+            if len(line) > self.MAX_STRING_LENGTH:
+                raise ParserSecurityError("ENV line length exceeds maximum allowed")
             line_str = line.strip()
             if not line_str or line_str.startswith("#"):
                 continue
+            if len(entries) > self.MAX_TOTAL_NODES:
+                raise ParserSecurityError(f"Maximum node count ({self.MAX_TOTAL_NODES}) exceeded")
             if "=" in line_str:
                 k, v = line_str.split("=", 1)
                 key = k.strip()
@@ -400,7 +531,28 @@ class SafeConfigParser:
         return raw, entries
 
     def _parse_xml(self, text: str) -> Tuple[Any, List[ParsedEntry]]:
-        # Safe XML parsing (standard ElementTree does not expand external entities)
+        upper = text.upper()
+        if "<!DOCTYPE" in upper or "<!ENTITY" in upper:
+            raise ParserSecurityError("XML DOCTYPE and ENTITY declarations are rejected for security reasons")
+
+        try:
+            root = ET.fromstring(text)
+        except Exception as e:
+            raise ParserError(f"XML parsing failed: {e}")
+
+        node_count = 0
+        def check_depth(node: ET.Element, depth: int):
+            nonlocal node_count
+            node_count += 1
+            if depth > self.MAX_NESTING_DEPTH:
+                raise ParserSecurityError(f"Maximum XML nesting depth ({self.MAX_NESTING_DEPTH}) exceeded")
+            if node_count > self.MAX_TOTAL_NODES:
+                raise ParserSecurityError(f"Maximum XML node count ({self.MAX_TOTAL_NODES}) exceeded")
+            for child in node:
+                check_depth(child, depth + 1)
+
+        check_depth(root, 1)
+
         entries: List[ParsedEntry] = []
         lines = text.splitlines()
 
@@ -411,10 +563,13 @@ class SafeConfigParser:
                     return idx
             return None
 
-        root = ET.fromstring(text)
         raw = {root.tag: {}}
 
-        def recurse(node: ET.Element, path: str):
+        def recurse(node: ET.Element, path: str, depth: int):
+            if depth > self.MAX_NESTING_DEPTH:
+                raise ParserSecurityError(f"Maximum XML nesting depth ({self.MAX_NESTING_DEPTH}) exceeded")
+            if len(entries) > self.MAX_TOTAL_NODES:
+                raise ParserSecurityError(f"Maximum XML node count ({self.MAX_TOTAL_NODES}) exceeded")
             line = find_tag_line(node.tag)
             text_val = node.text.strip() if node.text else None
             if text_val:
@@ -424,9 +579,9 @@ class SafeConfigParser:
                 entries.append(self._create_entry(attr_path, attr_v, line))
             for child in node:
                 child_path = f"{path}.{child.tag}"
-                recurse(child, child_path)
+                recurse(child, child_path, depth + 1)
 
-        recurse(root, root.tag)
+        recurse(root, root.tag, 1)
         return raw, entries
 
     def _create_entry(

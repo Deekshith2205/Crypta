@@ -126,6 +126,9 @@ def test_api_banking_pdf_report_endpoint():
 
 def test_api_audit_verify_valid_and_tampered():
     """POST /api/audit/verify verifies intact records and rejects tampered ones."""
+    from app.services.audit_chain_service import DEFAULT_AUDIT_CHAIN_SERVICE, seed_baseline_audit_records
+    seed_baseline_audit_records(DEFAULT_AUDIT_CHAIN_SERVICE)
+
     # Fetch legitimate report and audit record
     rep_resp = client.get("/api/banking/systems/BANK-PROF-CORE-BANKING/report/json")
     audit_rec = rep_resp.json()["audit"]

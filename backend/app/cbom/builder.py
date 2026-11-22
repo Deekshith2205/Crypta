@@ -62,14 +62,14 @@ ALGO_SECURITY_LEVELS = {
     "RSA-3072": {"primitive": "pke", "classical": 128, "quantum": 0, "functions": ["encrypt", "decrypt", "sign", "verify"]},
     "RSA-4096": {"primitive": "pke", "classical": 192, "quantum": 0, "functions": ["encrypt", "decrypt", "sign", "verify"]},
     "ECDSA": {"primitive": "signature", "classical": 128, "quantum": 0, "functions": ["sign", "verify"]},
-    "ECDHE": {"primitive": "key-agree", "classical": 128, "quantum": 0, "functions": ["key-agree"]},
-    "X25519": {"primitive": "key-agree", "classical": 128, "quantum": 0, "functions": ["key-agree"]},
+    "ECDHE": {"primitive": "key-agree", "classical": 128, "quantum": 0, "functions": ["keyderive"]},
+    "X25519": {"primitive": "key-agree", "classical": 128, "quantum": 0, "functions": ["keyderive"]},
     # Post-Quantum (NIST FIPS 203 / 204)
     "ML-KEM-512": {"primitive": "kem", "classical": 128, "quantum": 1, "functions": ["encapsulate", "decapsulate"]},
     "ML-KEM-768": {"primitive": "kem", "classical": 192, "quantum": 3, "functions": ["encapsulate", "decapsulate"]},
     "ML-KEM-1024": {"primitive": "kem", "classical": 256, "quantum": 5, "functions": ["encapsulate", "decapsulate"]},
     "ML-KEM": {"primitive": "kem", "classical": 192, "quantum": 3, "functions": ["encapsulate", "decapsulate"]},
-    "X25519MLKEM768": {"primitive": "kem", "classical": 192, "quantum": 3, "functions": ["encapsulate", "decapsulate", "key-agree"]},
+    "X25519MLKEM768": {"primitive": "kem", "classical": 192, "quantum": 3, "functions": ["encapsulate", "decapsulate", "keyderive"]},
     "ML-DSA-44": {"primitive": "signature", "classical": 128, "quantum": 2, "functions": ["sign", "verify"]},
     "ML-DSA-65": {"primitive": "signature", "classical": 192, "quantum": 3, "functions": ["sign", "verify"]},
     "ML-DSA-87": {"primitive": "signature", "classical": 256, "quantum": 5, "functions": ["sign", "verify"]},
@@ -188,12 +188,28 @@ class CBOMBuilder:
         crypto_props = self._build_crypto_properties(asset)
 
         # Custom provenance properties
+        evidence_status_val = (
+            asset.evidence_status.value
+            if hasattr(asset.evidence_status, "value")
+            else str(asset.evidence_status)
+        )
+        role_val = (
+            asset.role.value
+            if hasattr(asset.role, "value")
+            else str(asset.role)
+        )
+        agility_val = (
+            asset.crypto_agility.value
+            if hasattr(asset.crypto_agility, "value")
+            else str(asset.crypto_agility)
+        )
+
         properties = [
             CBOMProperty(name="quantumshield:source_file", value=asset.source_file),
             CBOMProperty(name="quantumshield:config_path", value=asset.source_path),
-            CBOMProperty(name="quantumshield:evidence_status", value=asset.evidence_status.value),
-            CBOMProperty(name="quantumshield:role", value=asset.role),
-            CBOMProperty(name="quantumshield:crypto_agility", value=asset.crypto_agility.value),
+            CBOMProperty(name="quantumshield:evidence_status", value=evidence_status_val),
+            CBOMProperty(name="quantumshield:role", value=role_val),
+            CBOMProperty(name="quantumshield:crypto_agility", value=agility_val),
         ]
         if asset.source_line is not None:
             properties.append(CBOMProperty(name="quantumshield:source_line", value=str(asset.source_line)))
@@ -257,16 +273,20 @@ class CBOMBuilder:
                 str(spec.get("classical")) if spec.get("classical") else None
             )
 
+            valid_modes = {"cbc", "ecb", "ccm", "gcm", "cfb", "ofb", "ctr", "other", "unknown"}
+            raw_mode = asset.mode.lower() if asset.mode else None
+            safe_mode = (raw_mode if raw_mode in valid_modes else "other") if raw_mode else None
+
             algo_props = AlgorithmProperties(
                 primitive=primitive,
                 parameterSetIdentifier=param_id,
                 curve=asset.curve,
-                mode=asset.mode.lower() if asset.mode else None,
+                mode=safe_mode,
                 padding=asset.padding.lower() if asset.padding else None,
                 cryptoFunctions=functions,
                 classicalSecurityLevel=classical,
                 nistQuantumSecurityLevel=quantum,
-                executionEnvironment="hardware-hsm" if "hsm" in str(asset.metadata).lower() else "software-plain-ram"
+                executionEnvironment="hardware" if "hsm" in str(asset.metadata).lower() else "software-plain-ram"
             )
 
             return CryptoProperties(

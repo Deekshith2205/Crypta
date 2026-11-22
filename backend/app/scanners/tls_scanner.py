@@ -12,7 +12,14 @@ import logging
 import certifi
 
 from app.scanners.domain_validator import normalize_domain_input, DomainValidationError
-from app.security.network import resolve_and_validate_hostname, UnsafeTargetError, DnsResolutionError
+from app.security.network import (
+    resolve_and_validate_hostname,
+    UnsafeTargetError,
+    DnsResolutionError,
+    validate_scan_port,
+    DisallowedPortError,
+    InvalidPortError,
+)
 from app.scanners.certificate_parser import parse_der_certificate, parse_certificate_chain
 from app.scanners.tls13_pqc import observe_tls13_key_exchange
 
@@ -81,9 +88,9 @@ class TlsScanner:
         """
         start_time = time.perf_counter()
 
-        # Step 1: Validate & normalize domain (strict input validation)
+        # Step 1: Validate port & domain (strict input validation)
+        target_port = validate_scan_port(port)
         hostname, _ = normalize_domain_input(domain_input)
-        target_port = port if (1 <= port <= 65535) else 443
 
         # Step 2: Resolve hostname safely (one-time resolution, SSRF defense)
         resolution = resolve_and_validate_hostname(hostname, timeout_seconds=self.connect_timeout)
@@ -145,7 +152,8 @@ class TlsScanner:
         except ssl.SSLCertVerificationError as e:
             # Verification failed, but the server supports TLS!
             is_trusted = False
-            verification_status = f"Certificate verification failed: {e.verify_message}"
+            msg = getattr(e, "verify_message", str(e))
+            verification_status = f"Certificate verification failed: {msg}"
         except ssl.SSLError as e:
             # Check if this was a cert verification issue
             if "CERTIFICATE_VERIFY_FAILED" in str(e):

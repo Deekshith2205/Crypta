@@ -1,0 +1,52 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - janya
+  pull_request:
+    branches:
+      - main
+      - master
+      - janya
+  workflow_dispatch:
+
+concurrency:
+  group: backend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-test-and-audit:
+    name: Backend Test & Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements.lock
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pip-audit
+
+      - name: Run backend pytest suite
+        run: pytest backend/tests -v
+
+      - name: Run supply-chain security audit
+        run: pip-audit --disable-pip -r backend/requirements.lock

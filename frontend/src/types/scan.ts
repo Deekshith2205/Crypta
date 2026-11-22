@@ -280,7 +280,7 @@ export type EvidenceItem = {
   confidence?: string;
   description?: string;
   layer?: SecurityLayer;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 };
 
 export type EvidenceGap = {
@@ -308,11 +308,11 @@ export type BankingAsset = {
   tags: string[];
   layers?: Partial<Record<SecurityLayer, EvidenceItem[]>>;
   cryptography?: CryptoConfiguration;
-  key_management?: Record<string, any>;
-  authentication?: Record<string, any>;
+  key_management?: Record<string, unknown>;
+  authentication?: Record<string, unknown>;
   evidence_items?: EvidenceItem[];
   evidence_gaps?: EvidenceGap[];
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 };
 
 export type BankingSystemProfile = BankingAsset;
@@ -349,7 +349,7 @@ export type AuditFinding = {
   impact: string;
   recommendation: string;
   remediation_priority: RemediationPriority;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 };
 
 export type ZeroTrustPillar =
@@ -409,6 +409,9 @@ export type KeyChainAnalysis = {
   authentication_algorithm?: string;
   primary_migration_dependencies: string[];
   notes: string;
+  agility_score?: number;
+  agility_rating?: string;
+  agility_rationale?: string;
 };
 
 export type TechnicalRiskContext = {
@@ -655,16 +658,37 @@ export type AuditRecord = {
   previous_hash: string;
   current_hash: string;
   timestamp: string;
+  signature?: string;
   schema_version: string;
   canonical_payload?: string | null;
 };
 
 export type AuditVerificationResult = {
   valid: boolean;
+  status?: string;
   record_id?: string | null;
   error?: string | null;
   records_checked: number;
   details: Record<string, unknown>;
+};
+
+export type AuditLedgerResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  records: AuditRecord[];
+};
+
+export type AuditHeadResponse = {
+  record_id?: string | null;
+  current_hash: string;
+  timestamp?: string | null;
+  record_count: number;
+  chain_valid: boolean;
+  status: string;
+  checkpoint?: Record<string, unknown> | null;
+  external_anchor?: string;
+  external_checkpoint?: Record<string, unknown> | null;
 };
 
 export type CompleteAssessmentReport = {
@@ -689,6 +713,8 @@ export type CompleteAssessmentReport = {
   what_if_results?: Record<string, unknown> | null;
   audit: AuditRecord;
   audit_metadata: AuditRecord;
+  zero_trust?: Record<string, unknown> | null;
+  compliance_mappings?: Record<string, unknown> | null;
   ai_advisory?: Record<string, unknown> | null;
 };
 
@@ -710,6 +736,7 @@ export type AIExplanationResult<T> = {
   data?: T | null;
   error?: string | null;
   disclaimer: string;
+  evidence_hash?: string | null;
 };
 
 export type FindingExplanationRequest = {
@@ -740,6 +767,10 @@ export type FindingExplanationResponse = {
   migration_considerations: string;
   standards_guidance: string;
   advisory_disclaimer: string;
+  evidence_hash?: string | null;
+  evidence_status?: string | null;
+  generated_at?: string | null;
+  provenance_verified?: boolean | null;
 };
 
 export type BankingRiskExplanationRequest = {
@@ -769,6 +800,10 @@ export type BankingRiskExplanationResponse = {
   supporting_evidence: string[];
   evidence_gaps_needed: string[];
   advisory_disclaimer: string;
+  evidence_hash?: string | null;
+  evidence_status?: string | null;
+  generated_at?: string | null;
+  provenance_verified?: boolean | null;
 };
 
 export type MigrationAdvisoryRequest = {
@@ -796,6 +831,10 @@ export type MigrationAdvisoryResponse = {
   suggested_migration_phases: string[];
   pre_deployment_validation_steps: string[];
   advisory_disclaimer: string;
+  evidence_hash?: string | null;
+  evidence_status?: string | null;
+  generated_at?: string | null;
+  provenance_verified?: boolean | null;
 };
 
 export type ReportExplanationRequest = {
@@ -823,4 +862,84 @@ export type ReportExplanationResponse = {
     governance_and_validation: string;
   };
   advisory_disclaimer: string;
+  evidence_hash?: string | null;
+  evidence_status?: string | null;
+  generated_at?: string | null;
+  provenance_verified?: boolean | null;
+};
+
+export type AIBudgetTelemetry = {
+  date: string;
+  daily_token_budget: number;
+  tokens_used_today: number;
+  tokens_remaining: number;
+  daily_cost_budget_usd: number;
+  cost_used_today_usd: number;
+  cost_remaining_usd: number;
+  is_budget_exceeded: boolean;
+  resets_at: string;
+  is_budget_exhausted?: boolean;
+  current_date?: string;
+  reset_at?: string;
+};
+
+// ==============================================================================
+// PHASE F: CYCLONEDX 1.7 CBOM (CRYPTOGRAPHIC BILL OF MATERIALS) TYPES
+// ==============================================================================
+
+export type CBOMProperty = {
+  name: string;
+  value: string;
+};
+
+export type CBOMAlgorithmProperties = {
+  primitive?: string;
+  parameterSetIdentifier?: string;
+  curve?: string;
+  executionEnvironment?: string;
+  implementationPlatform?: string;
+  certificationLevel?: string;
+  mode?: string;
+  padding?: string;
+  cryptoFunctions?: string[];
+  classicalSecurityLevel?: number;
+  nistQuantumSecurityLevel?: number;
+};
+
+export type CBOMCryptoProperties = {
+  assetType: 'algorithm' | 'certificate' | 'protocol' | 'related-crypto-material' | string;
+  algorithmProperties?: CBOMAlgorithmProperties;
+  certificateProperties?: Record<string, unknown>;
+  protocolProperties?: Record<string, unknown>;
+  relatedCryptoMaterialProperties?: Record<string, unknown>;
+  oid?: string;
+};
+
+export type CBOMComponent = {
+  type: string;
+  'bom-ref': string;
+  name: string;
+  description?: string;
+  cryptoProperties: CBOMCryptoProperties;
+  properties?: CBOMProperty[];
+};
+
+export type CBOMDependency = {
+  ref: string;
+  dependsOn: string[];
+};
+
+export type CBOMDocument = {
+  bomFormat: string;
+  specVersion: string;
+  serialNumber: string;
+  version: number;
+  metadata?: {
+    timestamp: string;
+    tools?: Array<{ vendor?: string; name?: string; version?: string }>;
+    component?: Record<string, unknown>;
+    properties?: CBOMProperty[];
+  };
+  components: CBOMComponent[];
+  dependencies?: CBOMDependency[];
 };

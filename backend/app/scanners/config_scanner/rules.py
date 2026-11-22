@@ -19,6 +19,7 @@ from app.scanners.config_scanner.models import (
     EvidenceStatus,
 )
 from app.scanners.config_scanner.parsers import ParsedEntry
+from app.security.crypto_catalog import parse_dh_parameter
 
 
 # Secret key terms to detect and redact with boundary protection
@@ -42,7 +43,7 @@ TLS_VERSION_PATTERN = re.compile(
 
 # Key exchange mechanisms (EXPLICIT ONLY)
 KEY_EXCHANGE_PATTERN = re.compile(
-    r"\b(X25519MLKEM768|X448MLKEM1024|ML-KEM-1024|ML-KEM-768|ML-KEM-512|ML-KEM|ECDHE|ECDH|X25519|X448|DHE|RSA)\b",
+    r"\b(X25519MLKEM768|X448MLKEM1024|ML-KEM-1024|ML-KEM-768|ML-KEM-512|ML-KEM|ECDHE|ECDH|X25519|X448|diffie-hellman-group[0-9]+-[a-z0-9\-]+|diffie-hellman-group-exchange-[a-z0-9\-]+|DH-[0-9]+|DH[0-9]+|FFDHE[0-9]+|DHE-[A-Za-z0-9\-]+|DHE|RSA)\b",
     re.IGNORECASE
 )
 
@@ -365,8 +366,11 @@ class ConfigRuleEngine:
         """
         obs_list: List[ConfigObservation] = []
         path_lower = entry.path.lower()
+        raw_key_lower = (entry.raw_key or "").lower()
 
-        is_kex_key = any(k in path_lower for k in (
+        is_dhparam_key = any(k in path_lower for k in ("dhparam", "dh_param", "ssl_dhparam", "dh_params")) or any(k in raw_key_lower for k in ("dhparam", "dh_param", "ssl_dhparam"))
+
+        is_kex_key = is_dhparam_key or any(k in path_lower for k in (
             "kex", "key_exchange", "ecdh", "groups", "supported_groups",
             "curves", "elliptic_curve", "ec_curves", "curve"
         ))
@@ -374,28 +378,101 @@ class ConfigRuleEngine:
         values = self._normalize_values(entry.value)
         agility = self._assess_agility(entry, values)
 
+        # 1. Evaluate explicit DH parameters (directives or filenames like dh1024.pem)
+        if is_dhparam_key:
+            for val in values:
+                val_str = str(val).strip()
+                dh_info = parse_dh_parameter(val_str) or parse_dh_parameter(path_lower)
+                algo = dh_info["canonical_name"] if dh_info else ("DH-1024" if "1024" in val_str else "Diffie-Hellman")
+                key_size = dh_info["key_size"] if dh_info else (1024 if "1024" in val_str else None)
+                sev = dh_info["severity"] if dh_info else ("CRITICAL" if "1024" in val_str else "HIGH")
+                rec = dh_info["recommendation"] if dh_info else "Upgrade to X25519 + ML-KEM-768 hybrid key exchange (NIST FIPS 203) and decommission finite-field Diffie-Hellman."
+                obs_list.append(
+                    ConfigObservation(
+                        file=self.source_file,
+                        line=entry.line,
+                        path=entry.path,
+                        value=val_str,
+                        role=CryptoRole.KEY_EXCHANGE,
+                        algorithm=algo,
+                        evidence_status=EvidenceStatus.OBSERVED,
+                        confidence="HIGH",
+                        severity=sev,
+                        description=f"Configured Diffie-Hellman parameter: {algo} ({key_size or 'unknown'} bits)",
+                        crypto_agility=agility,
+                        recommendation=rec,
+                        metadata={"key_exchange": algo, "key_size": key_size, "dh_param_file": val_str}
+                    )
+                )
+
         for val in values:
             val_str = str(val).strip()
-            # Look for explicit key exchange names
-            if is_kex_key or "kex" in entry.raw_key.lower():
-                matches = KEY_EXCHANGE_PATTERN.finditer(val_str)
-                for m in matches:
-                    algo = m.group(1).upper()
+            # If value itself is a DH pem file (e.g. ssl_dhparam /path/to/dh1024.pem) not already captured
+            if not is_dhparam_key and (val_str.endswith(".pem") or "dh" in val_str.lower()):
+                dh_file_info = parse_dh_parameter(val_str)
+                if dh_file_info:
                     obs_list.append(
                         ConfigObservation(
                             file=self.source_file,
                             line=entry.line,
                             path=entry.path,
-                            value=algo,
+                            value=val_str,
                             role=CryptoRole.KEY_EXCHANGE,
-                            algorithm=algo,
+                            algorithm=dh_file_info["canonical_name"],
                             evidence_status=EvidenceStatus.OBSERVED,
                             confidence="HIGH",
-                            description=f"Explicitly configured key exchange mechanism: {algo}",
+                            severity=dh_file_info["severity"],
+                            description=f"Configured Diffie-Hellman parameter: {dh_file_info['canonical_name']} ({dh_file_info['key_size'] or 'unknown'} bits)",
                             crypto_agility=agility,
-                            metadata={"key_exchange": algo}
+                            recommendation=dh_file_info["recommendation"],
+                            metadata={"key_exchange": dh_file_info["canonical_name"], "key_size": dh_file_info["key_size"], "dh_param_file": val_str}
                         )
                     )
+
+            # Look for explicit key exchange names
+            if is_kex_key or "kex" in raw_key_lower:
+                matches = KEY_EXCHANGE_PATTERN.finditer(val_str)
+                for m in matches:
+                    raw_algo = m.group(1)
+                    dh_info = parse_dh_parameter(raw_algo)
+                    if dh_info:
+                        algo = dh_info["canonical_name"]
+                        sev = dh_info["severity"]
+                        rec = dh_info["recommendation"]
+                        obs_list.append(
+                            ConfigObservation(
+                                file=self.source_file,
+                                line=entry.line,
+                                path=entry.path,
+                                value=raw_algo,
+                                role=CryptoRole.KEY_EXCHANGE,
+                                algorithm=algo,
+                                evidence_status=EvidenceStatus.OBSERVED,
+                                confidence="HIGH",
+                                severity=sev,
+                                description=f"Explicitly configured key exchange mechanism: {algo} ({dh_info['key_size'] or 'unknown'} bits)",
+                                crypto_agility=agility,
+                                recommendation=rec,
+                                metadata={"key_exchange": algo, "key_size": dh_info["key_size"]}
+                            )
+                        )
+                    else:
+                        algo = raw_algo.upper()
+                        obs_list.append(
+                            ConfigObservation(
+                                file=self.source_file,
+                                line=entry.line,
+                                path=entry.path,
+                                value=algo,
+                                role=CryptoRole.KEY_EXCHANGE,
+                                algorithm=algo,
+                                evidence_status=EvidenceStatus.OBSERVED,
+                                confidence="HIGH",
+                                description=f"Explicitly configured key exchange mechanism: {algo}",
+                                crypto_agility=agility,
+                                metadata={"key_exchange": algo}
+                            )
+                        )
 
             # Check explicit curves
             curve_matches = CURVE_PATTERN.finditer(val_str)

@@ -204,10 +204,34 @@ Internal controls such as pod-to-pod mTLS, database column-level encryption, KMS
 
 Run all backend commands from the Quantum_Shield repository root.
 
+#### 1. Reproducible Installation (Recommended)
+Install exact, cryptographically verified dependencies from the lockfile:
 ```bash
-# Install backend dependencies
-python -m pip install -r backend/requirements.txt
+python -m pip install --require-hashes -r backend/requirements.lock
+```
+*Why install from the lockfile?*
+Installing from `backend/requirements.lock` guarantees that direct and transitive dependencies match the tested dependency tree bit-for-bit, with SHA-256 integrity hashes preventing supply chain tampering or breaking minor/patch version drift.
 
+#### 2. Development / Loose Installation
+Alternatively, install loose dependencies from semantic version ranges:
+```bash
+python -m pip install -r backend/requirements.txt
+```
+
+#### 3. Lockfile Maintenance & Audits
+- **Target Python Version:** Python 3.13.x (architecture-independent wheels and source distributions). Note: binary wheels with C extensions (`cryptography`, `cffi`, `watchfiles`) are pinned to compatible ABI architectures.
+- **Run Backend Vulnerability Audit:**
+  ```bash
+  python -m pip_audit -r backend/requirements.lock
+  ```
+- **Update or Regenerate Lockfile:**
+  Edit constraints in `backend/requirements.in`, then recompile with exact hashes:
+  ```bash
+  python -m piptools compile backend/requirements.in --generate-hashes -o backend/requirements.lock
+  ```
+
+#### 4. Run Server
+```bash
 # Start the FastAPI backend server
 python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload
 ```
@@ -228,18 +252,18 @@ Open a separate terminal at the Quantum_Shield repository root.
 # Navigate to the frontend
 cd frontend
 
-# Install frontend dependencies
-npm install
+# Install frontend dependencies (deterministic install)
+npm ci
 
 # Start the Vite development server
 npm run dev
 
-# Run frontend tests
+# Run frontend tests (node:test)
 npm test
 
 # Run frontend type-check, lint, and production build
-npm exec -- tsc -p tsconfig.app.json --noEmit
-npm run lint
+npx tsc --noEmit
+npx oxlint
 npm run build
 ```
 
@@ -253,13 +277,13 @@ http://127.0.0.1:5173
 
 ```bash
 # Run all backend unit, integration, and security regression tests
-python -m pytest -q
+pytest backend/tests
 
 # Run frontend tests
 cd frontend && npm test
 ```
 
-Includes **426 passing backend unit, integration, and security tests** and **15 passing frontend tests** covering:
+Includes **731 passing backend unit, integration, and security tests** and **71 passing frontend tests** covering:
 - What-If Post-Quantum Migration Simulator (`app.services.migration_simulator`, `app.models.simulation`)
 - Zero-mutation deep-copy semantics and profile immutability
 - Strict migration target algorithm allow-list and validation rejection (422)
@@ -593,3 +617,205 @@ python -m pytest backend/tests/test_ai_intelligence.py -v
 # Run full test suite
 python -m pytest -q
 ```
+
+---
+
+## 13. Cryptographically Signed, Hash-Chained Audit Trail (Phase C)
+
+QuantumShield incorporates a tamper-evident audit trail for all finalized banking system assessments and security reports.
+
+### Architecture & Guarantees
+1. **Deterministic Canonical Hashing (RFC 8785)**: Every assessment payload is normalized with stable key ordering, uniform UTF-8 serialization, and exclusion of volatile runtime metadata (e.g., timestamps, random report IDs) using SHA-256 (`assessment_hash`).
+2. **Cryptographic Signing (HMAC-SHA256)**: Each audit record is signed using a persistent, secure 256-bit key (`QS_AUDIT_SIGNING_KEY` or `data/audit_signing.key`). Signing keys are never exposed in API payloads, logs, or reports.
+3. **Cryptographic Hash Chain Linkage**: Each record cryptographically links to the previous record's head hash:
+   $$\text{current\_hash} = \text{SHA-256}(\text{canonical\_payload} + \text{previous\_hash})$$
+4. **Persistent SQLite Ledger**: Records are committed to an ACID-compliant SQLite ledger (`data/audit_ledger.db`) with WAL mode, row locking, and indexed record IDs.
+5. **Controlled Creation & Idempotency**: `GET` requests never append records to the ledger. Idempotency checks prevent duplicate record insertion during retries of identical assessments.
+6. **Comprehensive Verification**: The verification engine independently validates:
+   - Payload hash integrity (`PAYLOAD_HASH_MISMATCH`)
+   - HMAC-SHA256 signature (`INVALID_SIGNATURE`)
+   - Hash chain continuity (`CHAIN_BROKEN`)
+   - Persistent ledger membership (`RECORD_NOT_IN_LEDGER`)
+   - Ledger checkpoint consistency (`LEDGER_CORRUPTED`)
+
+### Read-Only Audit Ledger APIs
+- `GET /api/audit/ledger?limit=50&offset=0&system_id=...`: Retrieves paginated record metadata in stable insertion order without modifying state or leaking keys.
+- `GET /api/audit/head`: Returns latest head hash, record count, and chain verification status.
+- `POST /api/audit/verify`: Verifies individual record payload, HMAC signature, and ledger presence.
+- `POST /api/audit/verify-chain`: Verifies sequence continuity across chained records.
+
+### Documented Security Limitations & Residual Risks
+- **Signing Key Protection**: HMAC-SHA256 integrity strictly depends on protecting the host signing key. An attacker who compromises the host and obtains the signing key can compute valid HMAC signatures for arbitrary records.
+- **Suffix Truncation & External Checkpointing**: A hash chain alone does not detect deletion of the entire ledger suffix if an attacker rewrites the database file. QuantumShield records anchor checkpoints (`audit_checkpoints`), but external anchoring or off-site log streaming is required to detect full ledger truncation if both the DB and filesystem are compromised.
+- **Storage Protection**: SQLite persistence provides restart durability and transaction isolation, but does not provide hardware-enforced write-once-read-many (WORM) storage against an administrator or attacker with local write access to the SQLite file.
+- **No Blockchain Claims**: QuantumShield implements a deterministic hash-chained audit ledger, not a distributed consensus blockchain or absolute tamper-proof system.
+
+---
+
+## 14. Banking Quantum Readiness, Cryptographic Agility & Migration Engine (Phase D)
+
+Phase D delivers enterprise-grade post-quantum cryptography management and banking migration infrastructure across eight core capabilities:
+
+### 14.1 CycloneDX 1.7 Cryptographic Bill of Materials (CBOM)
+- **Deterministic Generation**: Generates standardized, machine-readable cryptographic asset inventories strictly conforming to CycloneDX 1.7.
+- **Pure Inventory Invariant**: Enforces strict separation between inventory documentation and risk evaluation. The CBOM represents raw cryptographic assets (algorithms, key lengths, modes, padding) and never pollutes inventory schemas with proprietary risk scores or priority bands.
+- **RFC 8785 Canonical Serialization**: Serializes normalized asset representations with stable key sorting and deterministic UTF-8 encoding.
+
+### 14.2 Static Code & Crypto-Misuse Scanner Hardening
+- **Zero Execution Invariant**: Strict AST and regex-based parsing across Python, Java, JavaScript/TypeScript, and PHP. The scanner never executes, imports, or compiles scanned source code.
+- **AES-256 Grover Resilience Invariant**: Grover's algorithm provides quadratic speedup, meaning AES-256 retains ~128 bits of effective quantum security. Bulk AES-256 symmetric encryption is recognized as quantum-safe and is never classified as a quantum vulnerability.
+- **Risk Category Separation**: Enforces strict separation between Classical Security (`MISUSE-ECB-MODE`, `MISUSE-MD5-HASH`), Implementation Flaws (`MISUSE-STATIC-IV`, `MISUSE-STATIC-NONCE`), Secret Exposure (`MISUSE-HARDCODED-KEY`), and Quantum Exposure (`MISUSE-HARDCODED-RSA-KEX`, `MISUSE-HARDCODED-ECDH-KEX`).
+
+### 14.3 Multi-Tier Key Protection Chain & Agility Engine
+- **4-Tier Cryptographic Hierarchy**: Traces dependencies across:
+  1. *Data Encryption At-Rest*: Symmetrical bulk payload protection (AES-256-GCM).
+  2. *Key Wrapping / KEK*: Asymmetric or symmetric key encapsulation (ML-KEM-768 / AES-256-KW).
+  3. *Key Storage Facility*: Hardware/cloud key isolation (Certified HSM / Cloud KMS).
+  4. *Root Authentication*: Master key and certificate signatures (ML-DSA-65 / SLH-DSA-128s).
+- **Weak Link Isolation**: Accurately pinpoints that quantum vulnerabilities reside in asymmetric key wrapping and authentication, not AES-256.
+- **Deterministic Agility Scoring**: Computes a 0–100 Cryptographic Agility Score evaluating modularity, algorithm parameterization, and provider decoupling.
+
+### 14.4 Deterministic What-If Migration Simulator
+- **Hypothetical Modeling**: Simulates post-quantum substitutions (e.g., RSA-2048 $\to$ ML-KEM-768, ECDSA $\to$ ML-DSA-65) against temporary memory structures.
+- **Strict Immutability**: Guarantees zero mutation of baseline assets, persistent profiles, or database state.
+- **Delta Analysis**: Recalculates priority scores, risk reduction, resolved findings, and remaining dependencies using the exact deterministic risk engine.
+
+### 14.5 NIST SP 800-207 Zero-Trust Architecture Integration
+- **Six Standard Pillars**: Formalizes Identity, Device Context, Resource, Policy Decision Point, Least Privilege, and Continuous Verification.
+- **Observability Honesty (`NOT_OBSERVABLE != VULNERABLE`)**: Edge network scanners cannot passively verify internal authorization policies. Internal controls default honestly to `NOT_OBSERVABLE_EXTERNALLY` without penalizing security posture or assigning artificial vulnerabilities.
+
+### 14.6 Unified Banking Assessment & Executive Compliance Reporting
+- **Comprehensive Artifact Assembly**: Combines CBOM, Zero Trust, Key Protection Chain, What-If projection, and Sealed Audit into an integrated report generator.
+- **Standards Compliance Mappings**: Maps technical findings directly to:
+  - **NIST SP 800-227**: Recommendations for Cryptographic Key Management & Transition.
+  - **NSA CNSA 2.0**: Commercial National Security Algorithm Suite mandates.
+  - **NIST FIPS 203**: Module-Lattice-Based Key-Encapsulation Mechanism (ML-KEM).
+  - **NIST FIPS 204**: Module-Lattice-Based Digital Signature Algorithm (ML-DSA).
+  - **NIST FIPS 205**: Stateless Hash-Based Digital Signature Algorithm (SLH-DSA).
+
+### 14.7 End-to-End Frontend Banking Readiness & Migration Integration
+- **Interactive Visualizations**: Renders 4-tier Key Protection Chain hierarchies, cryptographic agility badges, and Zero Trust compliance cards.
+- **What-If Sandbox UI**: Interactive playground allowing CISOs to model cryptographic upgrades and visualize immediate priority score reductions.
+- **Full Quality Assurance**: Validated with zero TypeScript errors, zero lint warnings (`oxlint`), passing Vitest component suites, and production-optimized asset builds.
+
+---
+
+## 15. AI Readiness Intelligence & Reliability Engine (Phase D — AI Trust)
+
+QuantumShield incorporates a secure, resilient, and cryptographically verified AI reasoning layer providing contextual explanations of cryptographic findings, banking risk scoring rationales, migration advisories, and executive report summaries.
+
+### 15.1 Architectural Invariants & Deterministic Authority
+- **Code is Sole Authority**: The deterministic scanning and risk engine is the single source of truth. AI models are strictly advisory and never generate findings, assign severities, alter priority scores (0–100), reorder upgrade queues (P0–P3), or override compliance determinations.
+- **AES-256 Grover Resilience Invariant**: Rejects any assertions that AES-256 is quantum-broken or compromised by Shor's algorithm. Under Grover's algorithm, AES-256 retains 128-bit quantum security.
+- **Observability Honesty (`NOT_OBSERVABLE != VULNERABLE`)**: Explanations must not claim that unobservable internal controls indicate confirmed security flaws or compromises.
+
+### 15.2 Input Sanitization & Multi-Layer Adversarial Defenses (Task D1)
+- **Unicode NFKC Normalization**: Normalizes homoglyphs, fullwidth characters, and composite characters prior to inspection.
+- **Delimiter Breakout Protection**: Strictly isolates untrusted telemetry within `<untrusted_evidence>` boundaries; neutralizes delimiter breakout attempts (`</untrusted_evidence>`, markdown system role blocks) to `[ESCAPED_DELIMITER]`.
+- **Multilingual Injection Defense**: Neutralizes prompt injection commands across English, French, Spanish, German, Chinese, and Russian to `[FILTERED_INPUT]`.
+- **Sensitive Data & Secret Redaction**: Redacts API keys (OpenAI, Google, AWS, GitHub, Slack), PEM private keys, bearer JWT tokens, and high-entropy secrets ($H > 4.3$) while strictly preserving legitimate cryptographic digests (SHA-256, SHA-1, MD5, hex fingerprints).
+
+### 15.3 Deterministic Output Validation (Task D2)
+- **Invariant Verification Gate**: Validates all AI outputs against deterministic truth via `validate_ai_explanation`:
+  - Rejects claims asserting unobservable evidence is vulnerable.
+  - Rejects assertions that AES-256 is broken by Shor's algorithm.
+  - Rejects hallucinated NIST FIPS standards (only valid standards like FIPS 203, 204, 205 are accepted).
+  - Rejects severity and score override attempts.
+  - Rejects speculative financial dollar cost estimates.
+
+### 15.4 Deterministic Explanation Fallback (Task D3)
+- **Offline High Availability**: `DeterministicExplanationService` provides expert rule-based explanations across all finding types, risk postures, migration paths, and report summaries.
+- **Automatic Fail-Safe Engagement**: Engages automatically when external providers are unconfigured, time out, are rate-limited, return malformed JSON, or fail trust validation.
+
+### 15.5 Rate Limiting & Daily Cost Protection (Task D4)
+- **Sliding-Window Limiter**: Enforces global rate limiting (5 req/min, burst 10) on AI-enabled endpoints.
+- **Thread-Safe Daily Budget Tracker**: `AIBudgetTracker` manages daily token and dollar caps with automatic UTC midnight rollover, preventing denial-of-wallet cost runaway.
+- **Telemetry Endpoint**: `GET /ai/budget` provides live monitoring of token and cost consumption.
+
+### 15.6 Cryptographic Evidence Provenance (Task D5)
+- **RFC 8785 Canonical Serialization**: Formats input telemetry deterministically regardless of key order.
+- **SHA-256 Evidence Hashing**: Binds a unique `evidence_hash` to every generated explanation.
+- **Cryptographic Verification**: `verify_explanation_provenance` enables independent verification of tamper-free provenance between evidence and explanation.
+
+### 15.7 Provider Resilience & Schema Repair (Task D6)
+- **HTTP Resilience Module**: Exponential backoff and retry on transient errors (HTTP 502, 503, 504, 429 with `Retry-After <= 5.0s`, and network disconnects); fast fail on 4xx client errors.
+- **Schema Repair Pipeline**: Strips markdown fences, removes conversational preamble/postamble, normalizes smart quotes, and removes trailing commas before schema validation.
+
+### 15.8 Adversarial Test Suite (Task D7)
+- 23 comprehensive adversarial tests verifying prompt injection defeat, delimiter isolation, secret redaction, invariant enforcement, budget exhaustion blocking, fallback engagement, and tamper detection.
+
+---
+
+## 16. Reports, CBOM & TLS Hardening (Phase F)
+
+Phase F completes the reporting, Cryptographic Bill of Materials (CBOM), and TLS network inspection subsystem:
+
+### 16.1 CycloneDX 1.7 CBOM Generation and Verification
+- **CycloneDX 1.7 Conformance**: Deterministic generation of Cryptographic Bill of Materials adhering to the CycloneDX 1.7 cryptographic asset specification (`bomFormat: "CycloneDX"`, `specVersion: "1.7"`).
+- **URN-Based Serial Number**: UUIDv5 URN serial numbers generated deterministically from canonical profile hashes.
+- **Pure Inventory Discipline**: The CBOM documents raw cryptographic algorithm assets, key lengths, parameter sets, and execution modes. It strictly segregates inventory from evaluation metrics (no risk scores or priority bands injected into CBOM schema).
+- **Referential Integrity**: Components maintain valid BOM references (`bom-ref`) and dependency graphs without broken dependencies or dangling references.
+
+### 16.2 Executive Compliance and Upgrade Reports
+- **Multi-Format Export**: Generates executive PDF reports via ReportLab and machine-readable JSON exports (`/api/banking/report/export`).
+- **Cryptographic Upgrade Sequencing**: Produces deterministic phase-by-phase migration roadmaps (P0 Immediate to P3 Long-Term) aligned with CNSA 2.0 and NIST FIPS standards.
+- **Air-Gapped Reliability**: Report generation functions completely offline without external network or font asset dependencies.
+
+### 16.3 TLS Scanner Security Hardening
+- **HTTP Redirect Refusal**: Raw TCP socket connection strictly terminates without following HTTP 301/302 redirects, neutralizing open redirect SSRF attacks.
+- **DNS Rebinding Prevention**: Hostname resolution occurs exactly once. TCP connects directly to the validated IP literal while preserving SNI for TLS handshake verification.
+- **Strict Network Filtering**: Scans against RFC 1918 private subnets, loopback, link-local / cloud metadata (`169.254.169.254`), multicast, and IPv6 unique local/link-local addresses are rejected prior to socket creation.
+
+---
+
+## 17. Maintainability, Logging & CI/CD Pipelines (Phase G)
+
+Phase G implements production maintainability, centralized environment configuration, structured observability, and continuous integration quality gates:
+
+### 17.1 Centralized Typed Configuration (`app.config`)
+- **Pydantic v2 Models**: Hierarchical configuration organized into `ServerConfig`, `SecurityConfig`, `RateLimitConfig`, and `AuditConfig`.
+- **Environment Hydration**: Populated from environment variables via `AppConfig.from_env()`.
+- **Secret Protection**: Sensitive fields (`api_key`, `audit_signing_key`) have `repr=False` to prevent unintentional exposure in logs, dumps, or debugger traces.
+- **Startup Validation**: `validate_startup()` performs programmatic checks (e.g., forbidding wildcard CORS or default development keys when `ENVIRONMENT=production`).
+
+### 17.2 Structured Logging & Request Correlation
+- **Request Correlation (`X-Request-ID`)**: `RequestCorrelationIdMiddleware` assigns or propagates a unique correlation ID per request, sets an `asyncio` context variable, and emits the `X-Request-ID` response header.
+- **Context-Aware Log Records**: `CorrelationIdLogFilter` injects `%(request_id)s` into every Python logging record for end-to-end request tracing.
+- **Credential Scrubbing**: `sanitize_log_dict()` recursively redacts API keys, tokens, and password fields prior to serialization.
+
+### 17.3 Automated CI/CD Pipelines
+- **Backend Workflow (`.github/workflows/backend-ci.yml`)**:
+  - Triggers on push and pull requests targeting `main` and `janya`.
+  - Enforces `contents: read` minimal permissions and concurrency cancellation.
+  - Installs dependencies from lockfile / requirements.
+  - Executes full backend test suite (`pytest backend/tests`).
+  - Runs supply chain vulnerability scan (`pip-audit -r backend/requirements.lock`).
+- **Frontend Workflow (`.github/workflows/frontend-ci.yml`)**:
+  - Triggers on push and pull requests targeting `main` and `janya`.
+  - Sets up Node.js 22 with npm cache.
+  - Executes `npm ci`, `npx tsc --noEmit`, `npx oxlint`, `npm test`, and `npm run build`.
+  - Runs security audit (`npm audit --audit-level=high`).
+
+### 17.4 Supply Chain & Dependency Reliability
+- **Backend**: Deterministic dependency locking via `backend/requirements.lock` generated with `--generate-hashes`.
+- **Frontend**: Clean locked dependencies via `frontend/package-lock.json`.
+- **Vulnerability Status**: Local execution of `pip-audit` and `npm audit` confirms 0 known vulnerabilities.
+
+---
+
+## 18. Operational Architecture & Known Deployment Boundaries
+
+To ensure complete architectural clarity, QuantumShield documents the following operational boundaries:
+
+### 18.1 Phase C External Checkpoint Ledger Anchoring
+- **Local Verification vs External Anchor**: The internal SHA-256 hash-chained audit ledger operates autonomously and verifies locally without external dependencies (`LOCALLY_VERIFIED`).
+- **Operational Requirement (`QS_EXTERNAL_CHECKPOINT_URL`)**: External cryptographic anchoring requires deploying and configuring a live external RFC 3161 or trusted timestamping service via `QS_EXTERNAL_CHECKPOINT_URL`.
+- **Fail-Closed Semantics**: When `QS_REQUIRE_EXTERNAL_CHECKPOINT=true` and no external checkpoint service is reachable, the ledger verification fails closed with status `EXTERNAL_ANCHOR_UNAVAILABLE`.
+
+### 18.2 Phase D4 AI Budget Tracker Multi-Worker Boundary
+- **Process-Local Singleton**: `AIBudgetTracker` enforces token and cost limits using an in-memory thread-safe singleton.
+- **Multi-Worker Note**: In horizontally scaled multi-process deployments (e.g., multiple Uvicorn workers or container replicas), each process maintains its own independent in-memory counter. Production multi-worker deployments should configure a distributed backing store (such as Redis) to coordinate global budget enforcement.
+
+### 18.3 Phase F Direct IP Connection & Redirect Defense Architecture
+- **Raw Socket Architecture**: Network inspections use Python `socket.socket` and `ssl.wrap_socket`.
+- **Redirect Refusal**: The scanner does not execute an HTTP client engine (such as `requests` or `urllib`) for network perimeter discovery, ensuring zero risk of HTTP redirect chaining into internal networks.
